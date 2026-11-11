@@ -2,6 +2,7 @@ services:
   - type: web
     name: gdreed-draft-console
     runtime: node
+    plan: free
     buildCommand: npm ci && npm run build
     startCommand: npm run start
     healthCheckPath: /api/health
@@ -16,5 +17,6 @@ services:
         generateValue: true
 databases:
   - name: gdreed-postgres
+    plan: free
     databaseName: gdreed
     user: gdreed
