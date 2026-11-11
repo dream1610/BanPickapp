@@ -1,5 +1,6 @@
 ﻿import './style.css';
 import './ui-enhancements.css';
+import morphdom from 'morphdom';
 import { FORMATS, MAPS, MAP_TACTICS, STATES, addAudit, assignCaptain, autoAction, balanceTeams, createRoom, currentStep, mapById, pauseDraft, performDraftAction, resumeDraft, startDraft, teamMembers } from './core.js';
 import { currentUser, register, signIn, signOut } from './auth.js';
 import { commandRoom, connectRealtime, createRoomRemote, disconnectRealtime, joinRoomRemote, listMatches, listRooms, saveMatchRemote, serverNow, syncServerClock, watchRoom } from './network.js';
@@ -35,7 +36,7 @@ function readRooms() {
 }
 let rooms = [];
 let room = null;
-let view = 'maps'; let detailId = 'ascent'; let menu = false; let authMode = 'login'; let notice = ''; let galleryIndex = 0; let audioOpen = false; let pendingView = null; let selectedMatchId = null; let matchRecords = []; let renderedActionKey = null; let autoActionPending = false;
+let view = 'maps'; let detailId = 'ascent'; let menu = false; let authMode = 'login'; let notice = ''; let galleryIndex = 0; let audioOpen = false; let pendingView = null; let selectedMatchId = null; let matchRecords = []; let autoActionPending = false;
 const app = document.querySelector('#app');
 const save = () => {
   if (!room) return;
@@ -52,11 +53,70 @@ async function refreshRooms() {
   if (active) activateRoom(active);
 }
 async function refreshMatches() { matchRecords = (await listMatches()).matches; }
+function applyOptimisticCommand(type, payload) {
+ switch (type) {
+  case 'BALANCE': balanceTeams(room); break;
+  case 'ASSIGN_CAPTAIN': assignCaptain(room, payload.team, payload.memberId); break;
+  case 'START':
+   if (!room.members.every((member) => member.team)) balanceTeams(room);
+   startDraft(room);
+   break;
+  case 'PAUSE': pauseDraft(room); break;
+  case 'RESUME': resumeDraft(room); break;
+  case 'DRAFT_ACTION': performDraftAction(room, payload.value); break;
+  case 'AUTO_ACTION': autoAction(room); break;
+  case 'SET_READY': {
+   const member = room.members.find((item) => item.id === currentUser()?.id);
+   if (!member) throw new Error('Join the room before setting readiness.');
+   member.ready = Boolean(payload.ready);
+   addAudit(room, 'READY_CHANGED', member.name, member.ready ? 'Ready' : 'Not ready');
+   break;
+  }
+  case 'UPDATE_SETTINGS':
+   for (const key of ['name','description','format','teams','settings']) if (key in payload) room[key] = structuredClone(payload[key]);
+   addAudit(room, 'ROOM_UPDATED', currentUser()?.username || room.owner, 'Room settings updated');
+   break;
+  case 'UPDATE_MEMBER': {
+   const member = room.members.find((item) => item.id === payload.memberId);
+   if (!member) throw new Error('Member not found.');
+   if (payload.team !== undefined) member.team = payload.team || null;
+   if (payload.rating !== undefined) member.rating = Math.max(0, Math.min(100, Number(payload.rating)));
+   if (payload.seed !== undefined) member.seed = Math.max(1, Math.floor(Number(payload.seed)));
+   for (const team of ['A','B']) {
+    const captainId = room.teams[team].captainId;
+    if (!room.members.some((item) => item.id === captainId && item.team === team)) room.teams[team].captainId = null;
+   }
+   room.members.forEach((item) => { item.captain = room.teams[item.team]?.captainId === item.id; });
+   break;
+  }
+  case 'RECORD_RESULT':
+   room.draft.scores = structuredClone(payload.scores || {});
+   addAudit(room, 'RESULT_RECORDED', currentUser()?.username || room.owner, 'Scores saved');
+   break;
+  default: return false;
+ }
+ return true;
+}
 async function remoteCommand(type, payload = {}) {
   if (!room) throw new Error('Choose a room first.');
+ const previousRoom = structuredClone(room);
+   const previousVersion = Number(room.version);
+ try {
+  if (applyOptimisticCommand(type, payload)) {
+     room.version = previousVersion;
+   save();
+   render();
+  }
   const result = await commandRoom(room.id, type, payload);
-  activateRoom(result.room);
+  if (Number(result.room.version) >= Number(room.version)) activateRoom(result.room);
   return room;
+ } catch (error) {
+  if (room?.id === previousRoom.id && Number(room.version) <= previousVersion) {
+   activateRoom(previousRoom);
+   render();
+  }
+  throw error;
+ }
 }
 let configurationTimer;
 function queueConfigurationSync() {
@@ -150,7 +210,7 @@ function archiveView() {
  return `<section class="simple-view archive-view"><p>HALL OF FAME</p><h1>Match<br><em>archive.</em></h1><div class="archive-list">${records.length ? records.map((record) => `<button class="archive-row" data-match="${record.id}"><span><strong>${esc(record.teams.A)} <i>v</i> ${esc(record.teams.B)}</strong><small>${esc(record.roomCode)} · ${esc(record.format)} · ${new Date(record.recordedAt).toLocaleString()}</small></span><em>${record.winner ? esc(record.teams[record.winner]) : 'Draw'} · ${record.mapWins.A}:${record.mapWins.B}</em></button>`).join('') : '<p>No recorded matches yet.</p>'}</div></section>`;
 }
 function actionTitle() { const s = currentStep(room); if (!s) return 'Protocol complete'; return s[0] === 'DECIDER' ? 'The final decider' : s[0] === 'SIDE' ? `Team ${s[1]} selects side` : `Team ${s[1]} ${s[0].toLowerCase()}s a map`; }
-function mapCard(m) { const a = room.draft.actions.find((x) => x.mapId === m.id), latest = room.draft.actions.at(-1), actionKey = latest ? `${room.draft.id}:${room.draft.actions.length}:${latest.type}:${latest.mapId}` : null, recent = actionKey !== renderedActionKey && latest?.mapId === m.id ? ` recent-${latest.type.toLowerCase()}` : '', disabled = !!a || room.state === STATES.PAUSED; return `<button class="veto-map ${a ? a.type.toLowerCase() : ''}${recent}" style="--tone:${m.tone};--image:url('${coverImage(m)}')" data-map="${m.id}" ${disabled ? 'disabled' : ''}><span>${m.code}</span><strong>${m.name}</strong><small>${a ? `${a.type} · ${a.team || 'SYSTEM'}` : m.style}</small></button>`; }
+function mapCard(m) { const a = room.draft.actions.find((x) => x.mapId === m.id), latest = room.draft.actions.at(-1), recent = latest?.mapId === m.id ? ` recent-${latest.type.toLowerCase()}` : '', disabled = !!a || room.state === STATES.PAUSED; return `<button class="veto-map ${a ? a.type.toLowerCase() : ''}${recent}" style="--tone:${m.tone};--image:url('${coverImage(m)}')" data-map="${m.id}" ${disabled ? 'disabled' : ''}><span>${m.code}</span><strong>${m.name}</strong><small>${a ? `${a.type} · ${a.team || 'SYSTEM'}` : m.style}</small></button>`; }
 function vetoView() {
  const step = currentStep(room), side = step?.[0] === 'SIDE'; const ledger = room.draft.actions.map((a) => `<li><b>${a.type}</b><span>${mapById(a.mapId)?.name}</span><em>${a.team ? `Team ${a.team}` : 'Decider'}</em></li>`).join('');
  return `<section class="veto-view"><div class="veto-heading"><p>${room.state === STATES.PAUSED ? 'PROTOCOL PAUSED' : 'LIVE DRAFT'}</p><h1>${actionTitle()}</h1><div id="timer" class="timer">${room.state === STATES.PAUSED ? 'Paused' : time(room.draft.deadline - Date.now())}</div><button class="quiet-control" data-action="${room.state === STATES.PAUSED ? 'resume' : 'pause'}" ${room.settings.allowPause === false ? 'disabled' : ''}>${room.state === STATES.PAUSED ? 'Resume' : 'Pause'}</button>${progress()}</div><div class="veto-stage">${side ? '<div class="side-picker"><button data-side="Attack">Attack</button><button data-side="Defense">Defense</button></div>' : `<div class="veto-grid">${room.maps.map(mapCard).join('')}</div>`}<aside class="veto-ledger"><p>THE RECORD</p><ol>${ledger || '<li><span>Awaiting first action</span></li>'}</ol></aside></div></section>`;
@@ -184,8 +244,10 @@ function render() {
  video.style.setProperty('--video-opacity', String(room?.settings?.videoOpacity ?? 0.32));
  if (!videoEnabled) video.pause();
  else if (!document.hidden && video.paused && !video.error) video.play().catch(() => {});
- app.innerHTML = `<div class="app-content">${header()}${body()}${footer()}${audioPanel()}${overlay()}${notice ? `<div class="app-notice" role="status">${esc(notice)}</div>` : ''}</div>`;
- if (room?.draft?.actions?.length) { const latest = room.draft.actions.at(-1); renderedActionKey = `${room.draft.id}:${room.draft.actions.length}:${latest.type}:${latest.mapId}`; }
+ const nextApp = document.createElement('main');
+ nextApp.id = 'app';
+ nextApp.innerHTML = `<div class="app-content">${header()}${body()}${footer()}${audioPanel()}${overlay()}${notice ? `<div class="app-notice" role="status">${esc(notice)}</div>` : ''}</div>`;
+ morphdom(app, nextApp);
  mountRoomExtras();
 }
 function feedback(text) { notice = text; render(); setTimeout(() => { notice = ''; render(); }, 3500); }
