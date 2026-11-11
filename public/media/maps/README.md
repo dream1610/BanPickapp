@@ -40,10 +40,17 @@ The gallery uses the official map cover as a visual fallback when a local galler
 
 ```text
 ../background-video/background.mp4
-../background-music/track-01.mp3
-../background-music/track-02.mp3
-../background-music/track-03.mp3
-../ban-pick-music/ban-pick.mp3
+../background-music/1.opus
+../background-music/2.opus
+../background-music/3.opus
+../background-music/4.opus
+../background-music/5.opus
+../background-music/6.wav
+../background-music/7.opus
+../background-music/8.opus
+../background-music/9.opus
+../background-music/10.opus
+../ban-pick-music/ban-pick.opus
 ../sfx/select.mp3
 ../sfx/bansound.mp3
 ../sfx/chonsound.mp3
