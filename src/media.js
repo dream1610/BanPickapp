@@ -1,10 +1,11 @@
 const SETTINGS_KEY = 'gdreed-media-settings';
 const defaults = { master: 0.55, music: 0.5, sfx: 0.7, muted: false };
+const publicAsset = (path) => `${import.meta.env.BASE_URL}${path}`;
 const files = {
-  background: '/media/background-video/background.mp4',
-  music: ['/media/background-music/track-01.mp3','/media/background-music/track-02.mp3','/media/background-music/track-03.mp3'],
-  veto: '/media/ban-pick-music/ban-pick.mp3',
-  select: '/media/sfx/select.mp3', ban: '/media/sfx/bansound.mp3', pick: '/media/sfx/chonsound.mp3',
+  background: publicAsset('media/background-video/background.mp4'),
+  music: ['track-01.mp3','track-02.mp3','track-03.mp3'].map((file) => publicAsset(`media/background-music/${file}`)),
+  veto: publicAsset('media/ban-pick-music/ban-pick.mp3'),
+  select: publicAsset('media/sfx/select.mp3'), ban: publicAsset('media/sfx/bansound.mp3'), pick: publicAsset('media/sfx/chonsound.mp3'),
 };
 let settings = { ...defaults, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') };
 let roomPreferences = { musicEnabled:true, vetoMusicEnabled:true, sfxEnabled:true };
