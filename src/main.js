@@ -2,7 +2,7 @@
 import './ui-enhancements.css';
 import { FORMATS, MAPS, MAP_TACTICS, STATES, addAudit, assignCaptain, autoAction, balanceTeams, createRoom, currentStep, mapById, pauseDraft, performDraftAction, resumeDraft, startDraft, teamMembers } from './core.js';
 import { currentUser, register, signIn, signOut } from './auth.js';
-import { commandRoom, connectRealtime, createRoomRemote, disconnectRealtime, joinRoomRemote, listMatches, listRooms, saveMatchRemote, watchRoom } from './network.js';
+import { commandRoom, connectRealtime, createRoomRemote, disconnectRealtime, joinRoomRemote, listMatches, listRooms, saveMatchRemote, serverNow, syncServerClock, watchRoom } from './network.js';
 import { getMediaSettings, playSfx, setRoomMediaPreferences, setVetoMedia, unlockMedia, updateMediaSettings, videoMarkup } from './media.js';
 import { OFFICIAL_SCENE_GALLERIES } from './official-scenes.js';
 import { createMatchRecord, loadMatchArchive, saveMatchRecord } from './archive.js';
@@ -35,7 +35,7 @@ function readRooms() {
 }
 let rooms = [];
 let room = null;
-let view = 'maps'; let detailId = 'ascent'; let menu = false; let authMode = 'login'; let notice = ''; let galleryIndex = 0; let audioOpen = false; let pendingView = null; let selectedMatchId = null; let matchRecords = [];
+let view = 'maps'; let detailId = 'ascent'; let menu = false; let authMode = 'login'; let notice = ''; let galleryIndex = 0; let audioOpen = false; let pendingView = null; let selectedMatchId = null; let matchRecords = []; let renderedActionKey = null; let autoActionPending = false;
 const app = document.querySelector('#app');
 const save = () => {
   if (!room) return;
@@ -150,7 +150,7 @@ function archiveView() {
  return `<section class="simple-view archive-view"><p>HALL OF FAME</p><h1>Match<br><em>archive.</em></h1><div class="archive-list">${records.length ? records.map((record) => `<button class="archive-row" data-match="${record.id}"><span><strong>${esc(record.teams.A)} <i>v</i> ${esc(record.teams.B)}</strong><small>${esc(record.roomCode)} · ${esc(record.format)} · ${new Date(record.recordedAt).toLocaleString()}</small></span><em>${record.winner ? esc(record.teams[record.winner]) : 'Draw'} · ${record.mapWins.A}:${record.mapWins.B}</em></button>`).join('') : '<p>No recorded matches yet.</p>'}</div></section>`;
 }
 function actionTitle() { const s = currentStep(room); if (!s) return 'Protocol complete'; return s[0] === 'DECIDER' ? 'The final decider' : s[0] === 'SIDE' ? `Team ${s[1]} selects side` : `Team ${s[1]} ${s[0].toLowerCase()}s a map`; }
-function mapCard(m) { const a = room.draft.actions.find((x) => x.mapId === m.id), disabled = !!a || room.state === STATES.PAUSED; return `<button class="veto-map ${a ? a.type.toLowerCase() : ''}" style="--tone:${m.tone};--image:url('${coverImage(m)}')" data-map="${m.id}" ${disabled ? 'disabled' : ''}><span>${m.code}</span><strong>${m.name}</strong><small>${a ? `${a.type} · ${a.team || 'SYSTEM'}` : m.style}</small></button>`; }
+function mapCard(m) { const a = room.draft.actions.find((x) => x.mapId === m.id), latest = room.draft.actions.at(-1), actionKey = latest ? `${room.draft.id}:${room.draft.actions.length}:${latest.type}:${latest.mapId}` : null, recent = actionKey !== renderedActionKey && latest?.mapId === m.id ? ` recent-${latest.type.toLowerCase()}` : '', disabled = !!a || room.state === STATES.PAUSED; return `<button class="veto-map ${a ? a.type.toLowerCase() : ''}${recent}" style="--tone:${m.tone};--image:url('${coverImage(m)}')" data-map="${m.id}" ${disabled ? 'disabled' : ''}><span>${m.code}</span><strong>${m.name}</strong><small>${a ? `${a.type} · ${a.team || 'SYSTEM'}` : m.style}</small></button>`; }
 function vetoView() {
  const step = currentStep(room), side = step?.[0] === 'SIDE'; const ledger = room.draft.actions.map((a) => `<li><b>${a.type}</b><span>${mapById(a.mapId)?.name}</span><em>${a.team ? `Team ${a.team}` : 'Decider'}</em></li>`).join('');
  return `<section class="veto-view"><div class="veto-heading"><p>${room.state === STATES.PAUSED ? 'PROTOCOL PAUSED' : 'LIVE DRAFT'}</p><h1>${actionTitle()}</h1><div id="timer" class="timer">${room.state === STATES.PAUSED ? 'Paused' : time(room.draft.deadline - Date.now())}</div><button class="quiet-control" data-action="${room.state === STATES.PAUSED ? 'resume' : 'pause'}" ${room.settings.allowPause === false ? 'disabled' : ''}>${room.state === STATES.PAUSED ? 'Resume' : 'Pause'}</button>${progress()}</div><div class="veto-stage">${side ? '<div class="side-picker"><button data-side="Attack">Attack</button><button data-side="Defense">Defense</button></div>' : `<div class="veto-grid">${room.maps.map(mapCard).join('')}</div>`}<aside class="veto-ledger"><p>THE RECORD</p><ol>${ledger || '<li><span>Awaiting first action</span></li>'}</ol></aside></div></section>`;
@@ -185,6 +185,7 @@ function render() {
  if (!videoEnabled) video.pause();
  else if (!document.hidden && video.paused && !video.error) video.play().catch(() => {});
  app.innerHTML = `<div class="app-content">${header()}${body()}${footer()}${audioPanel()}${overlay()}${notice ? `<div class="app-notice" role="status">${esc(notice)}</div>` : ''}</div>`;
+ if (room?.draft?.actions?.length) { const latest = room.draft.actions.at(-1); renderedActionKey = `${room.draft.id}:${room.draft.actions.length}:${latest.type}:${latest.mapId}`; }
  mountRoomExtras();
 }
 function feedback(text) { notice = text; render(); setTimeout(() => { notice = ''; render(); }, 3500); }
@@ -197,7 +198,7 @@ app.addEventListener('submit', async (e) => {
    const data = new FormData(form);
    if (authMode === 'login') await signIn(data.get('username'), data.get('password'));
    else await register(data.get('username'), data.get('password'));
-   connectRealtime((updatedRoom) => { activateRoom(updatedRoom); render(); });
+  connectRealtime(handleRoomUpdate);
    await refreshRooms();
    await refreshMatches();
   view = pendingView || 'maps'; pendingView = null;
@@ -333,11 +334,14 @@ app.addEventListener('pointerdown', () => unlockMedia(), { once:true });
 document.addEventListener('visibilitychange', () => { const video=document.querySelector('.background-video'); if (!video) return; if (document.hidden) video.pause(); else video.play().catch(()=>{}); });
 app.addEventListener('submit', async (e) => { if (e.target.id !== 'auth-form') return; e.preventDefault(); const data = new FormData(e.target); try { if (authMode === 'login') await signIn(data.get('username'), data.get('password')); else await register(data.get('username'), data.get('password')); view = 'maps'; feedback('Account ready on this device.'); render(); } catch (error) { feedback(error.message); render(); } });
 app.addEventListener('click', async (e) => { const el = e.target.closest('[data-action],[data-map],[data-side],[data-captain],[data-view],[data-detail],[data-gallery],[data-pool]'); if (!el) return; try { unlockMedia(); if (el.dataset.view) { view = el.dataset.view; menu = false; audioOpen = false; render(); return; } if (el.dataset.detail) { detailId = el.dataset.detail; galleryIndex = 0; view = 'detail'; render(); return; } if (el.dataset.gallery !== undefined) { galleryIndex = Number(el.dataset.gallery); render(); return; } if (el.dataset.pool) { const ids=room.settings.selectedMapIds; if (ids.includes(el.dataset.pool)) { if (ids.length <= 7) throw new Error('Map pool must retain at least 7 maps.'); room.settings.selectedMapIds=ids.filter((id)=>id!==el.dataset.pool); } else room.settings.selectedMapIds=[...ids,el.dataset.pool]; render(); return; } if (el.dataset.action === 'menu') { menu = !menu; render(); return; } if (el.dataset.action === 'audio') { audioOpen = !audioOpen; render(); return; } if (el.dataset.action === 'mute') { updateMediaSettings({ muted: !getMediaSettings().muted }); render(); return; } if (el.dataset.action === 'auth' || el.dataset.action === 'account') { view = 'auth'; menu = false; render(); return; } if (el.dataset.action === 'toggle-auth') { authMode = authMode === 'login' ? 'register' : 'login'; render(); return; } if (el.dataset.action === 'signout') { signOut(); disconnectRealtime(); rooms = []; room = null; view = 'maps'; feedback('Signed out.'); render(); return; } if (el.dataset.action === 'balance') { await remoteCommand('BALANCE'); feedback('Teams balanced.'); } if (el.dataset.captain) { const [team, id] = el.dataset.captain.split(':'); await remoteCommand('ASSIGN_CAPTAIN', { team, memberId:id }); feedback('Captain appointed.'); } if (el.dataset.map) { const step=currentStep(room); await remoteCommand('DRAFT_ACTION', { value:el.dataset.map }); playSfx(step?.[0] === 'BAN' ? 'ban' : 'pick'); } if (el.dataset.side) await remoteCommand('DRAFT_ACTION', { value:el.dataset.side }); render(); } catch (error) { feedback(error.message); render(); } });
-setInterval(() => { if (room?.state === STATES.DRAFT) { if (Date.now() >= room.draft.deadline && currentUser()?.id === room.ownerId) remoteCommand('AUTO_ACTION').then(render).catch(() => {}); else { const timer = document.querySelector('#timer'); if (timer) timer.textContent = time(room.draft.deadline - Date.now()); } } }, 250);
-setInterval(() => { if (room?.state === STATES.PAUSED && room.draft.pausedAt && Date.now() - room.draft.pausedAt >= (room.settings.maxPauseSeconds || 300) * 1000 && currentUser()?.id === room.ownerId) remoteCommand('RESUME').then(render).catch(() => {}); }, 1000);
+setInterval(() => { if (room?.state !== STATES.DRAFT) return; const remaining = room.draft.deadline - serverNow(); if (remaining <= 0 && currentUser()?.id === room.ownerId && !autoActionPending) { autoActionPending = true; remoteCommand('AUTO_ACTION').then(render).catch(() => {}).finally(() => { autoActionPending = false; }); } else { const timer = document.querySelector('#timer'); if (timer) timer.textContent = time(remaining); } }, 250);
+setInterval(() => { if (room?.state === STATES.PAUSED && room.draft.pausedAt && serverNow() - room.draft.pausedAt >= (room.settings.maxPauseSeconds || 300) * 1000 && currentUser()?.id === room.ownerId) remoteCommand('RESUME').then(render).catch(() => {}); }, 1000);
+setInterval(() => syncServerClock().catch(() => {}), 30000);
+syncServerClock().catch(() => {});
+function handleRoomUpdate(updatedRoom) { if (!room || updatedRoom.id !== room.id || Number(updatedRoom.version) <= Number(room.version)) return; activateRoom(updatedRoom); render(); }
 async function boot() {
   if (currentUser()) {
-    connectRealtime((updatedRoom) => { activateRoom(updatedRoom); render(); });
+    connectRealtime(handleRoomUpdate);
     try { await Promise.all([refreshRooms(), refreshMatches()]); }
     catch { signOut(); notice = 'Your session expired. Please sign in again.'; }
   }

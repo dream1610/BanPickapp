@@ -21,10 +21,15 @@ for (const format of Object.keys(FORMATS)) {
   assert.equal(room.members.filter((member) => member.team === 'B').length, 3, `${format}: Team B size`);
   assert.ok(totals.A > 0 && totals.B > 0, `${format}: team totals`);
   startDraft(room);
+  const mapActionCount = FORMATS[format].steps.filter(([type]) => type !== 'SIDE').length;
   let guard = 40;
-  while (room.state === STATES.DRAFT && guard-- > 0) autoAction(room);
+  while (room.state === STATES.DRAFT && guard-- > 0) {
+    if (currentStep(room)[0] === 'SIDE') assert.equal(room.draft.actions.length, mapActionCount, `${format}: maps finish before side selection`);
+    autoAction(room);
+  }
   assert.equal(room.state, STATES.SUMMARY, `${format}: reaches summary`);
   assert.equal(room.draft.step, FORMATS[format].steps.length, `${format}: completes all protocol steps`);
+  assert.deepEqual(room.draft.sides.map((side) => side.mapId), room.draft.actions.filter((action) => action.type === 'PICK' || action.type === 'DECIDER').map((action) => action.mapId), `${format}: sides match selected maps`);
 }
 
 const archiveRoom = createRoom();
@@ -84,8 +89,12 @@ assert.equal(pauseRoom.state, STATES.PAUSED);
 const sideRoom = createRoom();
 balanceTeams(sideRoom);
 startDraft(sideRoom);
-sideRoom.draft.step = 3;
-sideRoom.draft.actions = [{ type:'PICK', team:'A', mapId:'ascent' }];
+sideRoom.draft.step = FORMATS.BO3.steps.findIndex(([type]) => type === 'SIDE');
+sideRoom.draft.actions = [
+  { type:'PICK', team:'A', mapId:'ascent' },
+  { type:'PICK', team:'B', mapId:'bind' },
+  { type:'DECIDER', team:null, mapId:'haven' },
+];
 sideRoom.settings.sideSelectionPolicy = 'PICKING_TEAM';
 assert.equal(currentStep(sideRoom)[1], 'A');
 sideRoom.settings.sideSelectionPolicy = 'OPPONENT';
@@ -93,4 +102,5 @@ assert.equal(currentStep(sideRoom)[1], 'B');
 sideRoom.settings.sideTimeout = 'Defense';
 autoAction(sideRoom);
 assert.equal(sideRoom.draft.sides[0].side, 'Defense');
+assert.equal(sideRoom.draft.sides[0].mapId, 'ascent');
 console.log('Core rule-engine tests passed for BO1, BO3, BO5, and BO7.');

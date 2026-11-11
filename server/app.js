@@ -50,6 +50,7 @@ app.get('/api/health', async (_request, response) => {
   await pool.query('SELECT 1');
   response.json({ status:'ok', service:'gdreed-api', now:new Date().toISOString() });
 });
+app.get('/api/clock', (_request, response) => response.json({ now:Date.now() }));
 app.post('/api/auth/register', async (request, response, next) => {
   try {
     const { username, password } = authInput.parse(request.body);
@@ -142,7 +143,7 @@ io.on('connection', (socket) => socket.on('room:watch', async (roomId) => {
   const result = await pool.query('SELECT snapshot FROM rooms WHERE id = $1', [roomId]);
   const room = result.rows[0]?.snapshot;
   if (room && (room.ownerId === socket.user.sub || room.members.some((member) => member.id === socket.user.sub))) socket.join(roomId);
-}));
+}).on('room:unwatch', (roomId) => socket.leave(roomId)));
 
 app.use(express.static(path.join(root, 'dist')));
 app.get('/{*splat}', (_request, response) => response.sendFile(path.join(root, 'dist/index.html')));

@@ -31,10 +31,10 @@ export const MAP_TACTICS = {
 };
 
 export const FORMATS = {
-  BO1: { label: 'Best of 1', steps: [['BAN','A'],['BAN','B'],['BAN','A'],['BAN','B'],['BAN','A'],['BAN','B'],['DECIDER',null]] },
-  BO3: { label: 'Best of 3', steps: [['BAN','A'],['BAN','B'],['PICK','A'],['SIDE','B'],['PICK','B'],['SIDE','A'],['BAN','A'],['BAN','B'],['DECIDER',null]] },
-  BO5: { label: 'Best of 5', steps: [['BAN','A'],['BAN','B'],['PICK','A'],['SIDE','B'],['PICK','B'],['SIDE','A'],['PICK','A'],['SIDE','B'],['PICK','B'],['SIDE','A'],['DECIDER',null]] },
-  BO7: { label: 'Custom Best of 7', steps: [['PICK','A'],['SIDE','B'],['PICK','B'],['SIDE','A'],['PICK','A'],['SIDE','B'],['PICK','B'],['SIDE','A'],['PICK','A'],['SIDE','B'],['PICK','B'],['SIDE','A'],['DECIDER',null]] },
+  BO1: { label: 'Best of 1', steps: [['BAN','A'],['BAN','B'],['BAN','A'],['BAN','B'],['BAN','A'],['BAN','B'],['DECIDER',null],['SIDE','A']] },
+  BO3: { label: 'Best of 3', steps: [['BAN','A'],['BAN','B'],['PICK','A'],['PICK','B'],['BAN','A'],['BAN','B'],['DECIDER',null],['SIDE','B'],['SIDE','A'],['SIDE','A']] },
+  BO5: { label: 'Best of 5', steps: [['BAN','A'],['BAN','B'],['PICK','A'],['PICK','B'],['PICK','A'],['PICK','B'],['DECIDER',null],['SIDE','B'],['SIDE','A'],['SIDE','B'],['SIDE','A'],['SIDE','A']] },
+  BO7: { label: 'Custom Best of 7', steps: [['PICK','A'],['PICK','B'],['PICK','A'],['PICK','B'],['PICK','A'],['PICK','B'],['DECIDER',null],['SIDE','B'],['SIDE','A'],['SIDE','B'],['SIDE','A'],['SIDE','B'],['SIDE','A'],['SIDE','A']] },
 };
 
 export const STATES = Object.freeze({ WAITING: 'WAITING', SETUP: 'TEAM_SETUP', DRAFT: 'BAN_PICK_ACTIVE', PAUSED: 'BAN_PICK_PAUSED', SUMMARY: 'SCORE_ENTRY' });
@@ -63,14 +63,19 @@ export function currentStep(room) {
   if (!step) return step;
   let [type, team] = step;
   if (team && room.draft.teamFlip) team = team === 'A' ? 'B' : 'A';
+  if (type === 'SIDE') {
+    const sideIndex = FORMATS[room.format].steps.slice(0, room.draft.step).filter(([stepType]) => stepType === 'SIDE').length;
+    const mapAction = room.draft.actions.filter((action) => action.type === 'PICK' || action.type === 'DECIDER')[sideIndex];
+    const policy = room.settings?.sideSelectionPolicy ?? 'OPPONENT';
+    const ownerTeam = room.members.find((member) => member.id === room.ownerId)?.team ?? 'A';
+    if (policy === 'PICKING_TEAM' && mapAction?.team) team = mapAction.team;
+    else if (policy === 'OWNER') team = ownerTeam;
+    else if (policy === 'OPPONENT' && mapAction?.team) team = mapAction.team === 'A' ? 'B' : 'A';
+    else if (policy === 'FORMAT' && room.draft.teamFlip) team = team === 'A' ? 'B' : 'A';
+    return [type, team, mapAction?.mapId];
+  }
   if (type !== 'SIDE') return [type, team];
-  const policy = room.settings?.sideSelectionPolicy ?? 'OPPONENT';
-  if (policy === 'FORMAT') return [type, team];
-  const lastPick = [...room.draft.actions].reverse().find((action) => action.type === 'PICK');
-  if (!lastPick) return [type, team];
-  if (policy === 'PICKING_TEAM') return [type, lastPick.team];
-  if (policy === 'OWNER') return [type, room.members.find((member) => member.id === room.ownerId)?.team ?? 'A'];
-  return [type, lastPick.team === 'A' ? 'B' : 'A'];
+  return [type, team];
 }
 export function teamMembers(room, team) { return room.members.filter((member) => member.team === team); }
 export function selectedMaps(room) { return room.draft.actions.filter((a) => a.type === 'PICK' || a.type === 'DECIDER').map((a) => a.mapId); }
@@ -130,7 +135,7 @@ export function performDraftAction(room, value, source = 'MANUAL') {
   const step = currentStep(room); if (!step) return;
   const [type, team] = step;
   if (type === 'SIDE') {
-    room.draft.sides.push({ mapId:selectedMaps(room).at(-1), team, side:value, source });
+    room.draft.sides.push({ mapId:step[2] ?? selectedMaps(room).at(-1), team, side:value, source });
     return advance(room, type, team, value, source);
   }
   if (type === 'DECIDER') {
