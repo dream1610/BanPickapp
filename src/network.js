@@ -15,6 +15,8 @@ export const listRooms = () => request('/api/rooms');
 export const createRoomRemote = () => request('/api/rooms', { method:'POST' });
 export const joinRoomRemote = (code) => request('/api/rooms/join', { method:'POST', body:JSON.stringify({ code }) });
 export const commandRoom = (id, type, payload = {}) => request(`/api/rooms/${id}/commands`, { method:'POST', body:JSON.stringify({ type, payload }) });
+export const listMatches = () => request('/api/matches');
+export const saveMatchRemote = (roomId, record) => request(`/api/rooms/${roomId}/matches`, { method:'POST', body:JSON.stringify({ record }) });
 export function connectRealtime(onRoom) { roomListener = onRoom; socket?.disconnect(); if (!token()) return; socket = io({ auth:{ token:token() } }); socket.on('room:updated', (room) => roomListener(room)); }
 export function watchRoom(id) { socket?.emit('room:watch', id); }
 export function disconnectRealtime() { socket?.disconnect(); socket = undefined; }

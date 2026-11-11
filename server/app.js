@@ -118,6 +118,22 @@ app.post('/api/rooms/:id/commands', authenticate, async (request, response, next
     await client.query('COMMIT'); room.version = updated.rows[0].version; io.to(room.id).emit('room:updated', room); response.json({ room });
   } catch (error) { await client.query('ROLLBACK'); next(error); } finally { client.release(); }
 });
+app.get('/api/matches', authenticate, async (_request, response, next) => {
+  try {
+    const result = await pool.query('SELECT record FROM match_records ORDER BY created_at DESC LIMIT 100');
+    response.json({ matches:result.rows.map((row) => row.record) });
+  } catch (error) { next(error); }
+});
+app.post('/api/rooms/:id/matches', authenticate, async (request, response, next) => {
+  try {
+    const record = z.object({ id:z.string().uuid() }).passthrough().parse(request.body.record);
+    const result = await pool.query('SELECT snapshot FROM rooms WHERE id = $1', [request.params.id]);
+    if (!result.rowCount) return response.status(404).json({ error:'Room not found.' });
+    if (result.rows[0].snapshot.ownerId !== request.user.sub) return response.status(403).json({ error:'Only the room owner can record a match.' });
+    await pool.query('INSERT INTO match_records (id, room_id, created_by, record) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO UPDATE SET record = EXCLUDED.record', [record.id, request.params.id, request.user.sub, record]);
+    response.status(201).json({ record });
+  } catch (error) { next(error); }
+});
 
 io.use((socket, next) => {
   try { socket.user = jwt.verify(socket.handshake.auth?.token, jwtSecret); next(); } catch { next(new Error('Authentication required.')); }

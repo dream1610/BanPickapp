@@ -2,7 +2,7 @@
 import './ui-enhancements.css';
 import { FORMATS, MAPS, MAP_TACTICS, STATES, addAudit, assignCaptain, autoAction, balanceTeams, createRoom, currentStep, mapById, pauseDraft, performDraftAction, resumeDraft, startDraft, teamMembers } from './core.js';
 import { currentUser, register, signIn, signOut } from './auth.js';
-import { commandRoom, connectRealtime, createRoomRemote, disconnectRealtime, joinRoomRemote, listRooms, watchRoom } from './network.js';
+import { commandRoom, connectRealtime, createRoomRemote, disconnectRealtime, joinRoomRemote, listMatches, listRooms, saveMatchRemote, watchRoom } from './network.js';
 import { getMediaSettings, playSfx, setRoomMediaPreferences, setVetoMedia, unlockMedia, updateMediaSettings, videoMarkup } from './media.js';
 import { OFFICIAL_SCENE_GALLERIES } from './official-scenes.js';
 import { createMatchRecord, loadMatchArchive, saveMatchRecord } from './archive.js';
@@ -35,7 +35,7 @@ function readRooms() {
 }
 let rooms = [];
 let room = null;
-let view = 'maps'; let detailId = 'ascent'; let menu = false; let authMode = 'login'; let notice = ''; let galleryIndex = 0; let audioOpen = false; let pendingView = null; let selectedMatchId = null;
+let view = 'maps'; let detailId = 'ascent'; let menu = false; let authMode = 'login'; let notice = ''; let galleryIndex = 0; let audioOpen = false; let pendingView = null; let selectedMatchId = null; let matchRecords = [];
 const app = document.querySelector('#app');
 const save = () => {
   if (!room) return;
@@ -51,11 +51,20 @@ async function refreshRooms() {
   const active = rooms.find((item) => item.id === localStorage.getItem(ACTIVE_ROOM_STORAGE));
   if (active) activateRoom(active);
 }
+async function refreshMatches() { matchRecords = (await listMatches()).matches; }
 async function remoteCommand(type, payload = {}) {
   if (!room) throw new Error('Choose a room first.');
   const result = await commandRoom(room.id, type, payload);
   activateRoom(result.room);
   return room;
+}
+let configurationTimer;
+function queueConfigurationSync() {
+  if (!room || currentUser()?.id !== room.ownerId) return;
+  clearTimeout(configurationTimer);
+  configurationTimer = setTimeout(() => remoteCommand('UPDATE_SETTINGS', {
+    name:room.name, description:room.description, format:room.format, teams:room.teams, settings:room.settings,
+  }).then(render).catch((error) => feedback(error.message)), 450);
 }
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const safeExternalUrl = (value) => { try { const url = new URL(value); return url.protocol === 'https:' ? esc(url.href) : ''; } catch { return ''; } };
@@ -132,10 +141,10 @@ function mountRoomExtras() {
 function roomHubView() {
  const user = currentUser();
  const ownedRooms = rooms.filter((item) => item.ownerId === user.id || item.members.some((member) => member.id === user.id));
- return `<section class="simple-view room-hub"><p>BAN / PICK</p><h1>Choose your<br><em>next match.</em></h1><div class="room-entry-actions"><button class="text-link" data-action="create-room">Create room <span>↗</span></button><button class="text-link" data-view="archive">Hall of Fame <span>↗</span></button></div><form id="join-room-form" class="join-room-form"><label>Room code<input name="roomCode" autocomplete="off" placeholder="GD-XXXX" required></label><button class="text-link" type="submit">Join room <span>↗</span></button></form><section class="local-room-list"><small>ROOMS ON THIS DEVICE</small>${ownedRooms.length ? ownedRooms.map((item) => `<button class="local-room-row" data-room="${item.id}"><span><strong>${esc(item.name)}</strong><small>${esc(item.code)} · ${item.members.length} members</small></span><i>↗</i></button>`).join('') : '<p>No rooms on this device yet.</p>'}<small class="local-only-note">Rooms are stored locally and are not shared across devices.</small></section></section>`;
+ return `<section class="simple-view room-hub"><p>BAN / PICK</p><h1>Choose your<br><em>next match.</em></h1><div class="room-entry-actions"><button class="text-link" data-action="create-room">Create room <span>↗</span></button><button class="text-link" data-view="archive">Hall of Fame <span>↗</span></button></div><form id="join-room-form" class="join-room-form"><label>Room code<input name="roomCode" autocomplete="off" placeholder="GD-XXXX" required></label><button class="text-link" type="submit">Join room <span>↗</span></button></form><section class="local-room-list"><small>YOUR SHARED ROOMS</small>${ownedRooms.length ? ownedRooms.map((item) => `<button class="local-room-row" data-room="${item.id}"><span><strong>${esc(item.name)}</strong><small>${esc(item.code)} · ${item.members.length} members</small></span><i>↗</i></button>`).join('') : '<p>No rooms yet.</p>'}<small class="local-only-note">Rooms sync securely through the shared server.</small></section></section>`;
 }
 function archiveView() {
- const records = loadMatchArchive();
+ const records = matchRecords;
  const selected = records.find((record) => record.id === selectedMatchId);
  if (selected) return `<section class="simple-view archive-view"><button class="back-link" data-action="archive-back">← &nbsp; Hall of Fame</button><p>MATCH ARCHIVE · ${esc(selected.roomCode)}</p><h1>${esc(selected.teams.A)} <em>v</em> ${esc(selected.teams.B)}</h1><div class="archive-summary"><span>${esc(selected.format)} · ${new Date(selected.recordedAt).toLocaleString()}</span><strong>${selected.winner ? `${esc(selected.teams[selected.winner])} won` : 'Draw'}</strong></div><div class="result-sheet">${selected.maps.map((map, index) => `<div class="result-line"><span>Map ${index + 1}</span><strong>${esc(map.mapName)}</strong><span>${map.teamA} : ${map.teamB}</span><em>${map.type === 'DECIDER' ? 'Decider' : `Selected by Team ${map.pickedBy}`}</em></div>`).join('')}</div><small>Recorded by ${esc(selected.createdBy)} · Room ${esc(selected.roomCode)}</small></section>`;
  return `<section class="simple-view archive-view"><p>HALL OF FAME</p><h1>Match<br><em>archive.</em></h1><div class="archive-list">${records.length ? records.map((record) => `<button class="archive-row" data-match="${record.id}"><span><strong>${esc(record.teams.A)} <i>v</i> ${esc(record.teams.B)}</strong><small>${esc(record.roomCode)} · ${esc(record.format)} · ${new Date(record.recordedAt).toLocaleString()}</small></span><em>${record.winner ? esc(record.teams[record.winner]) : 'Draw'} · ${record.mapWins.A}:${record.mapWins.B}</em></button>`).join('') : '<p>No recorded matches yet.</p>'}</div></section>`;
@@ -148,15 +157,15 @@ function vetoView() {
 }
 function resultView() {
  const picks = room.draft.actions.filter((a) => a.type === 'PICK' || a.type === 'DECIDER');
- return `<section class="result-view"><div class="editorial-head compact"><p>THE RESULT</p><h1>${esc(room.teams.A.name)} <em>v</em> ${esc(room.teams.B.name)}</h1>${progress()}</div><div class="result-sheet">${picks.map((a, i) => { const score = room.draft.scores?.[a.mapId] || {}; return `<div class="result-line"><span>Map ${i + 1}</span><strong>${mapById(a.mapId).name}</strong><input type="number" min="0" step="1" aria-label="${esc(room.teams.A.name)} score on ${mapById(a.mapId).name}" data-score-map="${a.mapId}" data-score-team="A" value="${score.A ?? 0}"><i>:</i><input type="number" min="0" step="1" aria-label="${esc(room.teams.B.name)} score on ${mapById(a.mapId).name}" data-score-map="${a.mapId}" data-score-team="B" value="${score.B ?? 0}"><em>${a.type === 'DECIDER' ? 'Decider' : `Selected by Team ${a.team}`}</em></div>`; }).join('')}</div><div class="flow-footer"><small>Scores and map actions are saved to this device.</small><button class="text-link" data-action="record">Save result <span>↗</span></button></div></section>`;
+ return `<section class="result-view"><div class="editorial-head compact"><p>THE RESULT</p><h1>${esc(room.teams.A.name)} <em>v</em> ${esc(room.teams.B.name)}</h1>${progress()}</div><div class="result-sheet">${picks.map((a, i) => { const score = room.draft.scores?.[a.mapId] || {}; return `<div class="result-line"><span>Map ${i + 1}</span><strong>${mapById(a.mapId).name}</strong><input type="number" min="0" step="1" aria-label="${esc(room.teams.A.name)} score on ${mapById(a.mapId).name}" data-score-map="${a.mapId}" data-score-team="A" value="${score.A ?? 0}"><i>:</i><input type="number" min="0" step="1" aria-label="${esc(room.teams.B.name)} score on ${mapById(a.mapId).name}" data-score-map="${a.mapId}" data-score-team="B" value="${score.B ?? 0}"><em>${a.type === 'DECIDER' ? 'Decider' : `Selected by Team ${a.team}`}</em></div>`; }).join('')}</div><div class="flow-footer"><small>Scores and map actions are saved to the shared match archive.</small><button class="text-link" data-action="record">Save result <span>↗</span></button></div></section>`;
 }
 function tournament() { return `<section class="simple-view"><p>TOURNAMENT CENTER</p><h1>The operation<br><em>comes next.</em></h1><div class="mist"><span>Match scheduling, brackets, public pages and tournament administration will connect to the Ban / Pick core when realtime storage is introduced.</span></div></section>`; }
 function settings() { return `<section class="simple-view"><p>SETTINGS</p><h1>Keep the ritual<br><em>your own.</em></h1><div class="mist settings-list"><button data-action="reset">Create a new local room ↗</button><button data-action="auth">${currentUser() ? 'Account settings' : 'Sign in or create account'} ↗</button><span>Audio folders are ready in <code>public/media</code>. Playback will activate when assets are added.</span></div></section>`; }
 function about() { return `<section class="simple-view"><p>ABOUT</p><h1>Built by<br><em>Gdreed.</em></h1><div class="mist"><span>Gdreed develops focused tools for organized play. This product is a map-veto ritual for Valorant communities, teams and tournament operators.</span></div></section>`; }
 function authView() {
  const user = currentUser();
- if (user) return `<section class="auth-view"><div class="auth-copy"><p>ACCOUNT</p><h1>${esc(user.username)}</h1><span>Signed in locally on this device.</span></div><div class="auth-panel"><p class="account-note">Your local profile and rooms stay in this browser.</p><button class="text-link" data-action="signout">Sign out <span>↗</span></button></div></section>`;
- return `<section class="auth-view"><div class="auth-copy"><p>${authMode === 'login' ? 'WELCOME BACK' : 'CREATE ACCOUNT'}</p><h1>${authMode === 'login' ? 'Sign in.' : 'Join the ritual.'}</h1><small>This offline MVP hashes passwords with PBKDF2 and stores data only on this device. It is not production authentication.</small></div><div class="auth-panel"><form id="auth-form"><label>Username<input name="username" autocomplete="username" required></label><label>Password<input name="password" type="password" minlength="8" autocomplete="${authMode === 'login' ? 'current-password' : 'new-password'}" required></label><button class="text-link" type="submit">${authMode === 'login' ? 'Sign in' : 'Create account'} <span>↗</span></button></form><button class="quiet-control" data-action="toggle-auth">${authMode === 'login' ? 'Create an account' : 'I already have an account'}</button></div></section>`;
+ if (user) return `<section class="auth-view"><div class="auth-copy"><p>ACCOUNT</p><h1>${esc(user.username)}</h1><span>Signed in to your shared account.</span></div><div class="auth-panel"><p class="account-note">Rooms and match history sync through the secure server.</p><button class="text-link" data-action="signout">Sign out <span>↗</span></button></div></section>`;
+ return `<section class="auth-view"><div class="auth-copy"><p>${authMode === 'login' ? 'WELCOME BACK' : 'CREATE ACCOUNT'}</p><h1>${authMode === 'login' ? 'Sign in.' : 'Join the ritual.'}</h1><small>Use your account to create, join and synchronize draft rooms across devices.</small></div><div class="auth-panel"><form id="auth-form"><label>Username<input name="username" autocomplete="username" required></label><label>Password<input name="password" type="password" minlength="8" autocomplete="${authMode === 'login' ? 'current-password' : 'new-password'}" required></label><button class="text-link" type="submit">${authMode === 'login' ? 'Sign in' : 'Create account'} <span>↗</span></button></form><button class="quiet-control" data-action="toggle-auth">${authMode === 'login' ? 'Create an account' : 'I already have an account'}</button></div></section>`;
 }
 function body() { if (view === 'maps') return mapLibrary(); if (view === 'detail') return mapDetail(); if (view === 'banpick') return !room ? roomHubView() : [STATES.DRAFT, STATES.PAUSED].includes(room.state) ? vetoView() : room.state === STATES.SUMMARY ? resultView() : roomView(); if (view === 'archive') return archiveView(); if (view === 'tournament') return tournament(); if (view === 'settings') return settings(); if (view === 'about') return about(); if (view === 'auth') return authView(); return home(); }
 function render() {
@@ -190,6 +199,7 @@ app.addEventListener('submit', async (e) => {
    else await register(data.get('username'), data.get('password'));
    connectRealtime((updatedRoom) => { activateRoom(updatedRoom); render(); });
    await refreshRooms();
+   await refreshMatches();
   view = pendingView || 'maps'; pendingView = null;
   if (view === 'banpick') {
    if (room && !room.ownerId) { room.ownerId = currentUser().id; room.owner = currentUser().username; save(); }
@@ -261,8 +271,10 @@ app.addEventListener('click', async (e) => {
  if (el.dataset.action === 'record') {
   try {
    const record = createMatchRecord(room, room.draft.scores || {}, user?.username || room.owner);
-   saveMatchRecord(record);
-   room.draft.recorded = true; addAudit(room, 'RESULT_RECORDED', user?.username || room.owner, record.id);
+   await remoteCommand('RECORD_RESULT', { scores:room.draft.scores || {} });
+   await saveMatchRemote(room.id, record);
+   await refreshMatches();
+   room.draft.recorded = true;
    selectedMatchId = record.id; view = 'archive'; setVetoMedia(false); notice = 'Match saved to Hall of Fame.'; render();
   } catch (error) { feedback(error.message); }
   e.preventDefault(); e.stopImmediatePropagation(); return;
@@ -272,7 +284,7 @@ app.addEventListener('input', (e) => {
  const input = e.target;
  if (input.dataset.teamName && room) {
   room.teams[input.dataset.teamName].name = input.value.trim() || `Team ${input.dataset.teamName}`;
-  save();
+  queueConfigurationSync();
  }
  if (input.dataset.memberTeam && room) {
   const member = room.members.find((item) => item.id === input.dataset.memberTeam);
@@ -281,7 +293,7 @@ app.addEventListener('input', (e) => {
    if (oldTeam && room.teams[oldTeam].captainId === member.id) room.teams[oldTeam].captainId = null;
    for (const team of ['A','B']) room.teams[team].captainId = room.members.some((item) => item.id === room.teams[team].captainId && item.team === team) ? room.teams[team].captainId : null;
    room.members.forEach((item) => { item.captain = room.teams[item.team]?.captainId === item.id; });
-  save(); render();
+  remoteCommand('UPDATE_MEMBER', { memberId:member.id, team:member.team }).then(render).catch((error) => feedback(error.message)); render();
   }
  }
  if (input.dataset.scoreMap && room) {
@@ -292,26 +304,26 @@ app.addEventListener('input', (e) => {
   save();
  }
 }, true);
-app.addEventListener('input', (e) => { const el = e.target; if (el.dataset.field && room) { room[el.dataset.field] = el.value; save(); } if (el.dataset.setting && room) { const numeric=['turnDuration','videoOpacity','maxMembers','maxPauseSeconds'].includes(el.dataset.setting); room.settings[el.dataset.setting] = numeric ? Number(el.value) : el.value === 'true' ? true : el.value === 'false' ? false : el.value; save(); setRoomMediaPreferences(room.settings); } if (el.dataset.audio) updateMediaSettings({ [el.dataset.audio]: Number(el.value) }); });
-app.addEventListener('click', (e) => { const poolMap = e.target.closest('[data-pool]'); if (poolMap && room) { room.settings.mapPoolPreset = 'MANUAL'; save(); } }, true);
+app.addEventListener('input', (e) => { const el = e.target; if (el.dataset.field && room) { room[el.dataset.field] = el.value; queueConfigurationSync(); } if (el.dataset.setting && room) { const numeric=['turnDuration','videoOpacity','maxMembers','maxPauseSeconds'].includes(el.dataset.setting); room.settings[el.dataset.setting] = numeric ? Number(el.value) : el.value === 'true' ? true : el.value === 'false' ? false : el.value; queueConfigurationSync(); setRoomMediaPreferences(room.settings); } if (el.dataset.audio) updateMediaSettings({ [el.dataset.audio]: Number(el.value) }); });
+app.addEventListener('click', (e) => { const poolMap = e.target.closest('[data-pool]'); if (poolMap && room) { room.settings.mapPoolPreset = 'MANUAL'; queueConfigurationSync(); } }, true);
 app.addEventListener('change', (e) => {
  const el = e.target;
  if (el.dataset.mapPreset && room) {
   room.settings.mapPoolPreset = el.value;
   if (el.value === 'ALL_OFFICIAL') room.settings.selectedMapIds = MAPS.map((map) => map.id);
-  save(); render(); return;
+  queueConfigurationSync(); render(); return;
  }
  if (el.dataset.memberRating && room) {
   const member = room.members.find((item) => item.id === el.dataset.memberRating);
   const rating = Number(el.value);
   if (!member || !Number.isInteger(rating) || rating < 0 || rating > 100) { feedback('Rating must be a whole number from 0 to 100.'); return; }
-  member.rating = rating; save(); render(); return;
+  member.rating = rating; remoteCommand('UPDATE_MEMBER', { memberId:member.id, rating }).then(render).catch((error) => feedback(error.message)); render(); return;
  }
  if (el.dataset.memberSeed && room) {
   const member = room.members.find((item) => item.id === el.dataset.memberSeed);
   const seed = Number(el.value);
   if (!member || !Number.isInteger(seed) || seed < 1) { feedback('Seed must be a positive whole number.'); return; }
-  member.seed = seed; save(); render(); return;
+  member.seed = seed; remoteCommand('UPDATE_MEMBER', { memberId:member.id, seed }).then(render).catch((error) => feedback(error.message)); render(); return;
  }
  if (el.dataset.field === 'format' || ['videoEnabled','showDiscord','discordLobby','discordTeamA','discordTeamB'].includes(el.dataset.setting)) render();
 });
@@ -323,4 +335,12 @@ app.addEventListener('submit', async (e) => { if (e.target.id !== 'auth-form') r
 app.addEventListener('click', async (e) => { const el = e.target.closest('[data-action],[data-map],[data-side],[data-captain],[data-view],[data-detail],[data-gallery],[data-pool]'); if (!el) return; try { unlockMedia(); if (el.dataset.view) { view = el.dataset.view; menu = false; audioOpen = false; render(); return; } if (el.dataset.detail) { detailId = el.dataset.detail; galleryIndex = 0; view = 'detail'; render(); return; } if (el.dataset.gallery !== undefined) { galleryIndex = Number(el.dataset.gallery); render(); return; } if (el.dataset.pool) { const ids=room.settings.selectedMapIds; if (ids.includes(el.dataset.pool)) { if (ids.length <= 7) throw new Error('Map pool must retain at least 7 maps.'); room.settings.selectedMapIds=ids.filter((id)=>id!==el.dataset.pool); } else room.settings.selectedMapIds=[...ids,el.dataset.pool]; render(); return; } if (el.dataset.action === 'menu') { menu = !menu; render(); return; } if (el.dataset.action === 'audio') { audioOpen = !audioOpen; render(); return; } if (el.dataset.action === 'mute') { updateMediaSettings({ muted: !getMediaSettings().muted }); render(); return; } if (el.dataset.action === 'auth' || el.dataset.action === 'account') { view = 'auth'; menu = false; render(); return; } if (el.dataset.action === 'toggle-auth') { authMode = authMode === 'login' ? 'register' : 'login'; render(); return; } if (el.dataset.action === 'signout') { signOut(); disconnectRealtime(); rooms = []; room = null; view = 'maps'; feedback('Signed out.'); render(); return; } if (el.dataset.action === 'balance') { await remoteCommand('BALANCE'); feedback('Teams balanced.'); } if (el.dataset.captain) { const [team, id] = el.dataset.captain.split(':'); await remoteCommand('ASSIGN_CAPTAIN', { team, memberId:id }); feedback('Captain appointed.'); } if (el.dataset.map) { const step=currentStep(room); await remoteCommand('DRAFT_ACTION', { value:el.dataset.map }); playSfx(step?.[0] === 'BAN' ? 'ban' : 'pick'); } if (el.dataset.side) await remoteCommand('DRAFT_ACTION', { value:el.dataset.side }); render(); } catch (error) { feedback(error.message); render(); } });
 setInterval(() => { if (room?.state === STATES.DRAFT) { if (Date.now() >= room.draft.deadline && currentUser()?.id === room.ownerId) remoteCommand('AUTO_ACTION').then(render).catch(() => {}); else { const timer = document.querySelector('#timer'); if (timer) timer.textContent = time(room.draft.deadline - Date.now()); } } }, 250);
 setInterval(() => { if (room?.state === STATES.PAUSED && room.draft.pausedAt && Date.now() - room.draft.pausedAt >= (room.settings.maxPauseSeconds || 300) * 1000 && currentUser()?.id === room.ownerId) remoteCommand('RESUME').then(render).catch(() => {}); }, 1000);
-render();
+async function boot() {
+  if (currentUser()) {
+    connectRealtime((updatedRoom) => { activateRoom(updatedRoom); render(); });
+    try { await Promise.all([refreshRooms(), refreshMatches()]); }
+    catch { signOut(); notice = 'Your session expired. Please sign in again.'; }
+  }
+  render();
+}
+boot();

@@ -61,6 +61,11 @@ export function applyCommand(snapshot, actor, command) {
       if (payload.team !== undefined) member.team = payload.team || null;
       if (payload.rating !== undefined) member.rating = Math.max(0, Math.min(100, Number(payload.rating)));
       if (payload.seed !== undefined) member.seed = Math.max(1, Math.floor(Number(payload.seed)));
+      for (const team of ['A', 'B']) {
+        const captainId = room.teams[team].captainId;
+        if (!room.members.some((item) => item.id === captainId && item.team === team)) room.teams[team].captainId = null;
+      }
+      room.members.forEach((item) => { item.captain = room.teams[item.team]?.captainId === item.id; });
       break;
     }
     case 'RECORD_RESULT':
