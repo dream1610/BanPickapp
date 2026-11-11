@@ -51,7 +51,7 @@ export function createRoom({ owner = null, empty = false } = {}) {
     ],
     maps: clone(MAPS), teams:{ A:{name:'Team Aureum', captainId:null}, B:{name:'Team Obsidian', captainId:null} },
       settings:{ selectedMapIds:MAPS.map((map)=>map.id), mapPoolPreset:'ALL_OFFICIAL', turnDuration:30, startTeam:'A', timeoutBehavior:'FIRST_AVAILABLE', sideTimeout:'Attack', sideSelectionPolicy:'OPPONENT', allowPause:true, maxPauseSeconds:300, allowSpectators:true, spectatorRatings:false, maxMembers:10, readyCheck:false, visibility:'Private', teamMode:'AUTO_BALANCE', balanceBy:'RATING_SEED', discordLobby:'', discordTeamA:'', discordTeamB:'', showDiscord:true, videoEnabled:true, videoOpacity:0.32, musicEnabled:true, vetoMusicEnabled:true, sfxEnabled:true },
-    draft:{ id:null, step:0, actions:[], deadline:null, pausedRemaining:null, pausedAt:null, sides:[], scores:{} }, audit:[], version:1,
+    draft:{ id:null, step:0, actions:[], deadline:null, pausedRemaining:null, pausedAt:null, transitionUntil:null, sides:[], scores:{} }, audit:[], version:1,
   };
 }
 
@@ -112,7 +112,7 @@ export function startDraft(room) {
   const selected = room.settings?.selectedMapIds ?? room.maps.map((map) => map.id);
   if (selected.length < 7) throw new Error('Map pool cần tối thiểu 7 map cho protocol hiện tại.');
   room.maps = clone(MAPS.filter((map) => selected.includes(map.id)));
-  room.state = STATES.DRAFT; room.draft = { id:crypto.randomUUID(), step:0, teamFlip:room.settings?.startTeam === 'B', actions:[], deadline:null, pausedRemaining:null, pausedAt:null, sides:[], scores:{} };
+  room.state = STATES.DRAFT; room.draft = { id:crypto.randomUUID(), step:0, teamFlip:room.settings?.startTeam === 'B', actions:[], deadline:null, pausedRemaining:null, pausedAt:null, transitionUntil:null, sides:[], scores:{} };
   setDeadline(room); addAudit(room, 'DRAFT_STARTED', room.owner, `${FORMATS[room.format].label} protocol started`);
 }
 export function setDeadline(room, seconds = room.settings?.turnDuration ?? 30) { room.draft.deadline = Date.now() + seconds * 1000; room.draft.pausedRemaining = null; }
@@ -135,7 +135,9 @@ export function performDraftAction(room, value, source = 'MANUAL') {
   const step = currentStep(room); if (!step) return;
   const [type, team] = step;
   if (type === 'SIDE') {
-    room.draft.sides.push({ mapId:step[2] ?? selectedMaps(room).at(-1), team, side:value, source });
+    const transitionUntil = Date.now() + 2000;
+    room.draft.sides.push({ mapId:step[2] ?? selectedMaps(room).at(-1), team, side:value, source, transitionUntil });
+    room.draft.transitionUntil = transitionUntil;
     return advance(room, type, team, value, source);
   }
   if (type === 'DECIDER') {
@@ -148,9 +150,10 @@ export function performDraftAction(room, value, source = 'MANUAL') {
 }
 function advance(room, type, team, value, source) {
   addAudit(room, `${type}_${source}`, team ? `Team ${team}` : 'System', value); room.draft.step += 1;
+  if (type !== 'SIDE') room.draft.transitionUntil = null;
   if (room.draft.step >= FORMATS[room.format].steps.length) {
     room.state = STATES.SUMMARY; room.draft.deadline = null; addAudit(room, 'DRAFT_COMPLETED', 'System', 'Protocol complete');
-  } else setDeadline(room);
+  } else setDeadline(room, (room.settings?.turnDuration ?? 30) + (type === 'SIDE' ? 2 : 0));
 }
 export function autoAction(room) {
   const step = currentStep(room); if (!step || room.state !== STATES.DRAFT) return;

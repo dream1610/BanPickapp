@@ -22,6 +22,7 @@ function normalizeRoom(value) {
   if (!value.ownerId && currentUser()) { value.ownerId = currentUser().id; value.owner = currentUser().username; }
   value.members.forEach((member) => { member.ready ??= true; });
   value.draft ??= { id:null, step:0, actions:[], deadline:null, pausedRemaining:null, pausedAt:null, sides:[], scores:{} };
+  value.draft.transitionUntil ??= null;
   value.draft.scores ??= {};
   if (!Array.isArray(value.maps) || !value.maps.length || value.maps.some((map) => !map.image)) value.maps = structuredClone(MAPS);
   return value;
@@ -225,17 +226,28 @@ function firstSideInfo(mapId, sides, teams) {
  if (!side) return 'First side not recorded';
  return `${esc(teams?.[side.team] || `Team ${side.team}`)} starts ${esc(side.side)}`;
 }
-function actionTitle() { const s = currentStep(room); if (!s) return 'Protocol complete'; return s[0] === 'DECIDER' ? 'The final decider' : s[0] === 'SIDE' ? `Team ${s[1]} selects side` : `Team ${s[1]} ${s[0].toLowerCase()}s a map`; }
+function actionTitle() { const transition = sideTransition(); if (transition) return `${esc(room.teams[transition.team]?.name || `Team ${transition.team}`)} selected ${esc(transition.side)}`; const s = currentStep(room); if (!s) return 'Protocol complete'; return s[0] === 'DECIDER' ? 'The final decider' : s[0] === 'SIDE' ? `Team ${s[1]} selects side` : `Team ${s[1]} ${s[0].toLowerCase()}s a map`; }
+function sideTransition() {
+ const side = room?.draft?.sides?.at(-1);
+ const until = Number(room?.draft?.transitionUntil ?? side?.transitionUntil);
+ const remaining = until - serverNow();
+ return side && remaining > 0 ? { ...side, remaining } : null;
+}
 function mapCard(m) { const a = room.draft.actions.find((x) => x.mapId === m.id), latest = room.draft.actions.at(-1), recent = latest?.mapId === m.id ? ` recent-${latest.type.toLowerCase()}` : '', disabled = !!a || room.state === STATES.PAUSED; return `<button class="veto-map ${a ? a.type.toLowerCase() : ''}${recent}" style="--tone:${m.tone};--image:url('${coverImage(m)}')" data-map="${m.id}" ${disabled ? 'disabled' : ''}><span>${m.code}</span><strong>${m.name}</strong><small>${a ? `${a.type} · ${a.team || 'SYSTEM'}` : m.style}</small></button>`; }
 function vetoView() {
- const step = currentStep(room), side = step?.[0] === 'SIDE', [type, team] = step || [];
+ const step = currentStep(room), side = step?.[0] === 'SIDE', [type, team] = step || [], transition = sideTransition();
  const myTeam = room.members.find((member) => member.id === currentUser()?.id)?.team;
- const isLocalTurn = Boolean(team && myTeam && team === myTeam);
+ const isLocalTurn = Boolean(!transition && team && myTeam && team === myTeam);
  const actionLabel = type === 'BAN' ? 'TO BAN' : type === 'PICK' ? 'TO PICK' : side ? 'TO CHOOSE SIDE' : '';
- const turnText = !team ? 'MAP DECIDER' : `${isLocalTurn ? 'YOUR TURN' : myTeam ? "ENEMY'S TURN" : `${esc(room.teams[team].name)}'S TURN`} ${actionLabel}`;
+ const turnText = transition ? `${esc(room.teams[transition.team].name)} CHOSE ${esc(transition.side)}` : !team ? 'MAP DECIDER' : `${isLocalTurn ? 'YOUR TURN' : myTeam ? "ENEMY'S TURN" : `${esc(room.teams[team].name)}'S TURN`} ${actionLabel}`;
+ const bannerTeam = transition?.team ?? team;
  const teamNames = ['A','B'].map((teamId) => `<span class="turn-team ${isLocalTurn && team === teamId ? 'active' : ''}">${esc(room.teams[teamId].name)}</span>`).join('');
- const ledger = room.draft.actions.map((a) => `<li><b>${a.type}</b><span>${mapById(a.mapId)?.name}</span><em>${a.team ? `Team ${a.team}` : 'Decider'}</em></li>`).join('');
- return `<section class="veto-view ${team ? `team-turn-${team.toLowerCase()}` : 'team-turn-system'} ${isLocalTurn ? 'is-local-turn' : 'is-enemy-turn'}"><div class="turn-team-strip">${teamNames}</div><div class="turn-banner ${isLocalTurn ? 'local-turn' : 'enemy-turn'}" aria-live="polite"><small>${team ? esc(room.teams[team].name) : 'SYSTEM'}</small><strong>${turnText}</strong></div><div class="veto-heading"><p>${room.state === STATES.PAUSED ? 'PROTOCOL PAUSED' : 'LIVE DRAFT'}</p><h1>${actionTitle()}</h1><div id="timer" class="timer">${room.state === STATES.PAUSED ? 'Paused' : time(room.draft.deadline - Date.now())}</div><button class="quiet-control" data-action="${room.state === STATES.PAUSED ? 'resume' : 'pause'}" ${room.settings.allowPause === false ? 'disabled' : ''}>${room.state === STATES.PAUSED ? 'Resume' : 'Pause'}</button>${progress()}</div><div class="veto-stage">${side ? '<div class="side-picker"><button data-side="Attack">Attack</button><button data-side="Defense">Defense</button></div>' : `<div class="veto-grid">${room.maps.map(mapCard).join('')}</div>`}<aside class="veto-ledger"><p>THE RECORD</p><ol>${ledger || '<li><span>Awaiting first action</span></li>'}</ol></aside></div></section>`;
+ const mapLedger = room.draft.actions.map((a) => `<li><b>${a.type}</b><span>${mapById(a.mapId)?.name}</span><em>${a.team ? `Team ${a.team}` : 'Decider'}</em></li>`);
+ const sideLedger = room.draft.sides.map((entry) => `<li class="side-ledger-entry"><b>SIDE</b><span>${esc(entry.side)}</span><em>${esc(room.teams[entry.team]?.name || `Team ${entry.team}`)}</em></li>`);
+ const ledger = [...mapLedger, ...sideLedger].join('');
+ const transitionPanel = transition ? `<div class="side-selection-result" aria-live="polite"><small>${esc(room.teams[transition.team]?.name || `Team ${transition.team}`)} SELECTED</small><strong>${esc(transition.side)}</strong><span>Next turn in ${time(transition.remaining)}</span></div>` : '';
+ const draftControls = transition ? transitionPanel : side ? '<div class="side-picker"><button data-side="Attack">Attack</button><button data-side="Defense">Defense</button></div>' : `<div class="veto-grid">${room.maps.map(mapCard).join('')}</div>`;
+ return `<section class="veto-view ${team ? `team-turn-${team.toLowerCase()}` : 'team-turn-system'} ${isLocalTurn ? 'is-local-turn' : 'is-enemy-turn'} ${transition ? 'side-transition-active' : ''}"><div class="turn-team-strip">${teamNames}</div><div class="turn-banner ${isLocalTurn ? 'local-turn' : transition ? 'side-transition-banner' : 'enemy-turn'}" aria-live="polite"><small>${bannerTeam ? esc(room.teams[bannerTeam].name) : 'SYSTEM'}</small><strong>${turnText}</strong></div><div class="veto-heading"><p>${room.state === STATES.PAUSED ? 'PROTOCOL PAUSED' : 'LIVE DRAFT'}</p><h1>${actionTitle()}</h1><div id="timer" class="timer">${transition ? `Next ${time(transition.remaining)}` : room.state === STATES.PAUSED ? 'Paused' : time(room.draft.deadline - serverNow())}</div><button class="quiet-control" data-action="${room.state === STATES.PAUSED ? 'resume' : 'pause'}" ${room.settings.allowPause === false ? 'disabled' : ''}>${room.state === STATES.PAUSED ? 'Resume' : 'Pause'}</button>${progress()}</div><div class="veto-stage">${draftControls}<aside class="veto-ledger"><p>THE RECORD</p><ol>${ledger || '<li><span>Awaiting first action</span></li>'}</ol></aside></div></section>`;
 }
 function resultView() {
  const picks = room.draft.actions.filter((a) => a.type === 'PICK' || a.type === 'DECIDER');
@@ -249,7 +261,7 @@ function authView() {
  if (user) return `<section class="auth-view"><div class="auth-copy"><p>ACCOUNT</p><h1>${esc(user.username)}</h1><span>Signed in to your shared account.</span></div><div class="auth-panel"><p class="account-note">Rooms and match history sync through the secure server.</p><button class="text-link" data-action="signout">Sign out <span>↗</span></button></div></section>`;
  return `<section class="auth-view"><div class="auth-copy"><p>${authMode === 'login' ? 'WELCOME BACK' : 'CREATE ACCOUNT'}</p><h1>${authMode === 'login' ? 'Sign in.' : 'Join the ritual.'}</h1><small>Use your account to create, join and synchronize draft rooms across devices.</small></div><div class="auth-panel"><form id="auth-form"><label>Username<input name="username" autocomplete="username" required></label><label>Password<input name="password" type="password" minlength="8" autocomplete="${authMode === 'login' ? 'current-password' : 'new-password'}" required></label><button class="text-link" type="submit">${authMode === 'login' ? 'Sign in' : 'Create account'} <span>↗</span></button></form><button class="quiet-control" data-action="toggle-auth">${authMode === 'login' ? 'Create an account' : 'I already have an account'}</button></div></section>`;
 }
-function body() { if (view === 'maps') return mapLibrary(); if (view === 'detail') return mapDetail(); if (view === 'banpick') return !room ? roomHubView() : [STATES.DRAFT, STATES.PAUSED].includes(room.state) ? vetoView() : room.state === STATES.SUMMARY ? resultView() : roomView(); if (view === 'archive') return archiveView(); if (view === 'tournament') return tournament(); if (view === 'settings') return settings(); if (view === 'about') return about(); if (view === 'auth') return authView(); return home(); }
+function body() { if (view === 'maps') return mapLibrary(); if (view === 'detail') return mapDetail(); if (view === 'banpick') return !room ? roomHubView() : [STATES.DRAFT, STATES.PAUSED].includes(room.state) || (room.state === STATES.SUMMARY && sideTransition()) ? vetoView() : room.state === STATES.SUMMARY ? resultView() : roomView(); if (view === 'archive') return archiveView(); if (view === 'tournament') return tournament(); if (view === 'settings') return settings(); if (view === 'about') return about(); if (view === 'auth') return authView(); return home(); }
 function render() {
  save();
  setRoomMediaPreferences(room?.settings || {});
@@ -418,7 +430,27 @@ app.addEventListener('pointerdown', () => unlockMedia(), { once:true });
 document.addEventListener('visibilitychange', () => { const video=document.querySelector('.background-video'); if (!video) return; if (document.hidden) video.pause(); else video.play().catch(()=>{}); });
 app.addEventListener('submit', async (e) => { if (e.target.id !== 'auth-form') return; e.preventDefault(); const data = new FormData(e.target); try { if (authMode === 'login') await signIn(data.get('username'), data.get('password')); else await register(data.get('username'), data.get('password')); view = 'maps'; feedback('Account ready on this device.'); render(); } catch (error) { feedback(error.message); render(); } });
 app.addEventListener('click', async (e) => { const el = e.target.closest('[data-action],[data-map],[data-side],[data-captain],[data-view],[data-detail],[data-gallery],[data-pool]'); if (!el) return; try { unlockMedia(); if (el.dataset.view) { view = el.dataset.view; menu = false; audioOpen = false; render(); return; } if (el.dataset.detail) { detailId = el.dataset.detail; galleryIndex = 0; view = 'detail'; render(); return; } if (el.dataset.gallery !== undefined) { galleryIndex = Number(el.dataset.gallery); render(); return; } if (el.dataset.pool) { const ids=room.settings.selectedMapIds; if (ids.includes(el.dataset.pool)) { if (ids.length <= 7) throw new Error('Map pool must retain at least 7 maps.'); room.settings.selectedMapIds=ids.filter((id)=>id!==el.dataset.pool); } else room.settings.selectedMapIds=[...ids,el.dataset.pool]; render(); return; } if (el.dataset.action === 'menu') { menu = !menu; render(); return; } if (el.dataset.action === 'audio') { audioOpen = !audioOpen; render(); return; } if (el.dataset.action === 'mute') { updateMediaSettings({ muted: !getMediaSettings().muted }); render(); return; } if (el.dataset.action === 'auth' || el.dataset.action === 'account') { view = 'auth'; menu = false; render(); return; } if (el.dataset.action === 'toggle-auth') { authMode = authMode === 'login' ? 'register' : 'login'; render(); return; } if (el.dataset.action === 'signout') { signOut(); disconnectRealtime(); rooms = []; room = null; view = 'maps'; feedback('Signed out.'); render(); return; } if (el.dataset.action === 'balance') { await remoteCommand('BALANCE'); feedback('Teams balanced.'); } if (el.dataset.captain) { const [team, id] = el.dataset.captain.split(':'); await remoteCommand('ASSIGN_CAPTAIN', { team, memberId:id }); feedback('Captain appointed.'); } if (el.dataset.map) { const step=currentStep(room); await remoteCommand('DRAFT_ACTION', { value:el.dataset.map }); playSfx(step?.[0] === 'BAN' ? 'ban' : 'pick'); } if (el.dataset.side) await remoteCommand('DRAFT_ACTION', { value:el.dataset.side }); render(); } catch (error) { feedback(error.message); render(); } });
-setInterval(() => { if (room?.state !== STATES.DRAFT) return; const remaining = room.draft.deadline - serverNow(); if (remaining <= 0 && currentUser()?.id === room.ownerId && !autoActionPending) { autoActionPending = true; remoteCommand('AUTO_ACTION').then(render).catch(() => {}).finally(() => { autoActionPending = false; }); } else { const timer = document.querySelector('#timer'); if (timer) timer.textContent = time(remaining); } }, 250);
+app.addEventListener('click', async (event) => {
+ const sideButton = event.target.closest('[data-side]');
+ if (!sideButton || !room) return;
+ event.preventDefault(); event.stopImmediatePropagation();
+ playSfx('pick');
+ try {
+  await remoteCommand('DRAFT_ACTION', { value:sideButton.dataset.side });
+ } catch (error) { feedback(error.message); }
+}, true);
+let sideTransitionWasActive = false;
+setInterval(() => {
+ const transition = sideTransition();
+ const transitionActive = Boolean(transition);
+ if (transitionActive !== sideTransitionWasActive) { sideTransitionWasActive = transitionActive; render(); }
+ if (room?.state !== STATES.DRAFT) return;
+ const remaining = room.draft.deadline - serverNow();
+ const timer = document.querySelector('#timer');
+ if (transition) { if (timer) timer.textContent = `NEXT ${time(transition.remaining)}`; return; }
+ if (remaining <= 0 && currentUser()?.id === room.ownerId && !autoActionPending) { autoActionPending = true; remoteCommand('AUTO_ACTION').then(render).catch(() => {}).finally(() => { autoActionPending = false; }); }
+ else if (timer) timer.textContent = time(remaining);
+}, 250);
 setInterval(() => { if (room?.state === STATES.PAUSED && room.draft.pausedAt && serverNow() - room.draft.pausedAt >= (room.settings.maxPauseSeconds || 300) * 1000 && currentUser()?.id === room.ownerId) remoteCommand('RESUME').then(render).catch(() => {}); }, 1000);
 setInterval(() => syncServerClock().catch(() => {}), 30000);
 syncServerClock().catch(() => {});

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { FORMATS, MAPS, MAP_TACTICS, STATES, autoAction, balanceTeams, createRoom, currentStep, startDraft } from '../src/core.js';
+import { applyCommand } from '../server/room-service.js';
 import { OFFICIAL_SCENE_GALLERIES } from '../src/official-scenes.js';
 import { createMatchRecord, loadMatchArchive, saveMatchRecord } from '../src/archive.js';
 
@@ -24,6 +25,7 @@ for (const format of Object.keys(FORMATS)) {
   const mapActionCount = FORMATS[format].steps.filter(([type]) => type !== 'SIDE').length;
   let guard = 40;
   while (room.state === STATES.DRAFT && guard-- > 0) {
+    if (room.draft.transitionUntil) room.draft.transitionUntil = Date.now() - 1;
     if (currentStep(room)[0] === 'SIDE') assert.equal(room.draft.actions.length, mapActionCount, `${format}: maps finish before side selection`);
     autoAction(room);
   }
@@ -103,4 +105,7 @@ sideRoom.settings.sideTimeout = 'Defense';
 autoAction(sideRoom);
 assert.equal(sideRoom.draft.sides[0].side, 'Defense');
 assert.equal(sideRoom.draft.sides[0].mapId, 'ascent');
+assert.ok(sideRoom.draft.transitionUntil > Date.now());
+assert.equal(sideRoom.draft.sides[0].transitionUntil, sideRoom.draft.transitionUntil);
+assert.throws(() => applyCommand(sideRoom, { id:'p1', username:'Aether' }, { type:'DRAFT_ACTION', payload:{ value:'Attack' } }), /transition to finish/);
 console.log('Core rule-engine tests passed for BO1, BO3, BO5, and BO7.');

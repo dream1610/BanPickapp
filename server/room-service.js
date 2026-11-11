@@ -9,6 +9,7 @@ function requireOwner(room, userId) {
 
 function requireCaptain(room, userId) {
   const draft = room.state === STATES.DRAFT ? room.draft : null;
+  if (draft?.transitionUntil && Date.now() < draft.transitionUntil) throw new Error('Wait for the side-selection transition to finish.');
   const member = room.members.find((item) => item.id === userId);
   if (!draft || !member?.captain) throw new Error('Only the active team captain can make a draft action.');
   const [, team] = currentStep(room);
@@ -48,7 +49,11 @@ export function applyCommand(snapshot, actor, command) {
     case 'PAUSE': pauseDraft(room); break;
     case 'RESUME': resumeDraft(room); break;
     case 'DRAFT_ACTION': requireCaptain(room, actor.id); performDraftAction(room, payload.value); break;
-    case 'AUTO_ACTION': requireOwner(room, actor.id); autoAction(room); break;
+    case 'AUTO_ACTION':
+      requireOwner(room, actor.id);
+      if (room.draft.transitionUntil && Date.now() < room.draft.transitionUntil) throw new Error('Wait for the side-selection transition to finish.');
+      autoAction(room);
+      break;
     case 'UPDATE_SETTINGS': {
       const allowed = ['name','description','format','teams','settings'];
       for (const key of allowed) if (key in payload) room[key] = clone(payload[key]);
