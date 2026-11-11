@@ -15,7 +15,7 @@ const veto = new Audio(files.veto); veto.preload = 'none'; veto.loop = true;
 const sound = (src) => { const audio = new Audio(src); audio.preload = 'auto'; audio.volume = volume('sfx'); return audio; };
 function volume(kind) { return settings.muted ? 0 : settings.master * settings[kind]; }
 function save() { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); apply(); }
-function fade(audio, target, ms = 700) { const start = audio.volume, tick = 50, steps = Math.max(1, ms / tick), delta = (target - start) / steps; const timer = setInterval(() => { audio.volume = Math.max(0, Math.min(1, audio.volume + delta)); if ((delta >= 0 && audio.volume >= target) || (delta < 0 && audio.volume <= target)) { audio.volume = target; clearInterval(timer); if (target === 0 && audio === music && vetoMode) audio.pause(); } }, tick); }
+function fade(audio, target, ms = 700) { const start = audio.volume, tick = 50, steps = Math.max(1, ms / tick), delta = (target - start) / steps; const timer = setInterval(() => { audio.volume = Math.max(0, Math.min(1, audio.volume + delta)); if ((delta >= 0 && audio.volume >= target) || (delta < 0 && audio.volume <= target)) { audio.volume = target; clearInterval(timer); if (target === 0 && ((audio === music && vetoMode) || (audio === veto && !vetoMode))) audio.pause(); } }, tick); }
 function nextTrack() { if (!roomPreferences.musicEnabled || vetoMode || failedTracks >= files.music.length) return; index = (index + 1) % files.music.length; failedTracks += 1; music.src = files.music[index]; music.volume = 0; music.play().then(() => { failedTracks = 0; fade(music, volume('music')); }).catch(() => {}); }
 music.addEventListener('ended', () => { failedTracks = 0; nextTrack(); });
 music.addEventListener('error', nextTrack);
@@ -28,11 +28,12 @@ export function setRoomMediaPreferences(preferences = {}) {
   else if (unlocked && vetoMode && veto.paused) setVetoMedia(true);
 }
 export function setVetoMedia(active) {
+  if (unlocked && vetoMode === active && (active ? !veto.paused : !music.paused)) return;
   vetoMode = active;
   if (!unlocked) return;
   if (active) {
-    fade(music, 0, 850);
-    if (roomPreferences.vetoMusicEnabled) { veto.volume = 0; veto.play().then(() => fade(veto, volume('music'), 850)).catch(() => {}); }
+    fade(music, 0, 1000);
+    if (roomPreferences.vetoMusicEnabled) { veto.volume = 0; veto.play().then(() => fade(veto, volume('music'), 1000)).catch(() => {}); }
     else { veto.pause(); if (roomPreferences.musicEnabled) nextTrack(); }
   } else {
     fade(veto, 0, 650);

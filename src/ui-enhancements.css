@@ -639,6 +639,76 @@ html {
   animation: map-level 900ms ease-out both;
 }
 
+.veto-view {
+  min-height: calc(100vh - 110px);
+}
+
+.veto-view::before {
+  content: '';
+  position: fixed;
+  z-index: 4;
+  inset: 12px;
+  border: 1px solid #d7ae7240;
+  box-shadow: inset 0 0 34px #d7ae720a, 0 0 26px #d7ae7208;
+  pointer-events: none;
+  animation: veto-frame-fade 4s ease-in-out infinite alternate;
+}
+
+.turn-team-strip {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin: 0 auto 18px;
+}
+
+.turn-team {
+  min-width: 150px;
+  padding: 8px 14px;
+  color: #aaa49b;
+  border: 1px solid #ffffff24;
+  text-align: center;
+  font-size: 10px;
+  transition: color 500ms ease, border-color 500ms ease, background-color 500ms ease, box-shadow 500ms ease;
+}
+
+.turn-team.active {
+  color: #f3d48f;
+  border-color: #d7ae72;
+  background: #d7ae7214;
+  box-shadow: 0 0 18px #d7ae7224, inset 0 0 12px #d7ae7212;
+  animation: active-team-glow 2.4s ease-in-out infinite alternate;
+}
+
+.turn-banner {
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  margin: 0 auto 18px;
+  text-align: center;
+}
+
+.turn-banner small {
+  color: #c8b99a;
+  font-size: 9px;
+  letter-spacing: 0.16em;
+}
+
+.turn-banner strong {
+  color: #efd08a;
+  font: 400 17px 'Playfair Display';
+  animation: turn-callout 1.8s ease-in-out infinite alternate;
+}
+
+.team-turn-b .turn-team.active {
+  animation-delay: 180ms;
+}
+
+.first-side-note {
+  grid-column: 1 / -1;
+  color: #d7ae72;
+  font-size: 10px;
+}
+
 @keyframes ban-shatter {
   0% {
     clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
@@ -676,5 +746,56 @@ html {
   100% {
     box-shadow: inset 0 0 0 1px #d7ae7260;
     filter: none;
+  }
+}
+
+@keyframes veto-frame-fade {
+  from {
+    opacity: 0.36;
+    box-shadow: inset 0 0 22px #d7ae7206, 0 0 18px #d7ae7206;
+  }
+
+  to {
+    opacity: 0.78;
+    box-shadow: inset 0 0 44px #d7ae7210, 0 0 32px #d7ae7210;
+  }
+}
+
+@keyframes active-team-glow {
+  from {
+    box-shadow: 0 0 10px #d7ae7218, inset 0 0 8px #d7ae720c;
+  }
+
+  to {
+    box-shadow: 0 0 22px #d7ae7240, inset 0 0 16px #d7ae7222;
+  }
+}
+
+@keyframes turn-callout {
+  from {
+    opacity: 0.72;
+    transform: translateY(2px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 680px) {
+  .veto-view::before {
+    inset: 6px;
+  }
+
+  .turn-team-strip {
+    gap: 6px;
+  }
+
+  .turn-team {
+    min-width: 0;
+    flex: 1;
+    padding: 8px 5px;
+    overflow-wrap: anywhere;
   }
 }

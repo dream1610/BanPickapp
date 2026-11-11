@@ -97,21 +97,32 @@ function applyOptimisticCommand(type, payload) {
  }
  return true;
 }
+function isVetoState(state) { return [STATES.DRAFT, STATES.PAUSED].includes(state); }
+function syncVetoMusic(previousState, nextState) {
+ const wasActive = isVetoState(previousState);
+ const isActive = isVetoState(nextState);
+ if (wasActive !== isActive) setVetoMedia(isActive);
+}
 async function remoteCommand(type, payload = {}) {
   if (!room) throw new Error('Choose a room first.');
  const previousRoom = structuredClone(room);
    const previousVersion = Number(room.version);
  try {
   if (applyOptimisticCommand(type, payload)) {
+  syncVetoMusic(previousRoom.state, room.state);
      room.version = previousVersion;
    save();
    render();
   }
   const result = await commandRoom(room.id, type, payload);
-  if (Number(result.room.version) >= Number(room.version)) activateRoom(result.room);
+  if (Number(result.room.version) >= Number(room.version)) {
+   syncVetoMusic(room.state, result.room.state);
+   activateRoom(result.room);
+  }
   return room;
  } catch (error) {
   if (room?.id === previousRoom.id && Number(room.version) <= previousVersion) {
+   syncVetoMusic(room.state, previousRoom.state);
    activateRoom(previousRoom);
    render();
   }
@@ -206,18 +217,26 @@ function roomHubView() {
 function archiveView() {
  const records = matchRecords;
  const selected = records.find((record) => record.id === selectedMatchId);
- if (selected) return `<section class="simple-view archive-view"><button class="back-link" data-action="archive-back">← &nbsp; Hall of Fame</button><p>MATCH ARCHIVE · ${esc(selected.roomCode)}</p><h1>${esc(selected.teams.A)} <em>v</em> ${esc(selected.teams.B)}</h1><div class="archive-summary"><span>${esc(selected.format)} · ${new Date(selected.recordedAt).toLocaleString()}</span><strong>${selected.winner ? `${esc(selected.teams[selected.winner])} won` : 'Draw'}</strong></div><div class="result-sheet">${selected.maps.map((map, index) => `<div class="result-line"><span>Map ${index + 1}</span><strong>${esc(map.mapName)}</strong><span>${map.teamA} : ${map.teamB}</span><em>${map.type === 'DECIDER' ? 'Decider' : `Selected by Team ${map.pickedBy}`}</em></div>`).join('')}</div><small>Recorded by ${esc(selected.createdBy)} · Room ${esc(selected.roomCode)}</small></section>`;
+ if (selected) return `<section class="simple-view archive-view"><button class="back-link" data-action="archive-back">← &nbsp; Hall of Fame</button><p>MATCH ARCHIVE · ${esc(selected.roomCode)}</p><h1>${esc(selected.teams.A)} <em>v</em> ${esc(selected.teams.B)}</h1><div class="archive-summary"><span>${esc(selected.format)} · ${new Date(selected.recordedAt).toLocaleString()}</span><strong>${selected.winner ? `${esc(selected.teams[selected.winner])} won` : 'Draw'}</strong></div><div class="result-sheet">${selected.maps.map((map, index) => `<div class="result-line"><span>Map ${index + 1}</span><strong>${esc(map.mapName)}</strong><span>${map.teamA} : ${map.teamB}</span><em>${map.type === 'DECIDER' ? 'Decider' : `Selected by Team ${map.pickedBy}`}</em><small class="first-side-note">${firstSideInfo(map.mapId, selected.sides, selected.teams)}</small></div>`).join('')}</div><small>Recorded by ${esc(selected.createdBy)} · Room ${esc(selected.roomCode)}</small></section>`;
  return `<section class="simple-view archive-view"><p>HALL OF FAME</p><h1>Match<br><em>archive.</em></h1><div class="archive-list">${records.length ? records.map((record) => `<button class="archive-row" data-match="${record.id}"><span><strong>${esc(record.teams.A)} <i>v</i> ${esc(record.teams.B)}</strong><small>${esc(record.roomCode)} · ${esc(record.format)} · ${new Date(record.recordedAt).toLocaleString()}</small></span><em>${record.winner ? esc(record.teams[record.winner]) : 'Draw'} · ${record.mapWins.A}:${record.mapWins.B}</em></button>`).join('') : '<p>No recorded matches yet.</p>'}</div></section>`;
+}
+function firstSideInfo(mapId, sides, teams) {
+ const side = sides?.find((item) => item.mapId === mapId);
+ if (!side) return 'First side not recorded';
+ return `${esc(teams?.[side.team] || `Team ${side.team}`)} starts ${esc(side.side)}`;
 }
 function actionTitle() { const s = currentStep(room); if (!s) return 'Protocol complete'; return s[0] === 'DECIDER' ? 'The final decider' : s[0] === 'SIDE' ? `Team ${s[1]} selects side` : `Team ${s[1]} ${s[0].toLowerCase()}s a map`; }
 function mapCard(m) { const a = room.draft.actions.find((x) => x.mapId === m.id), latest = room.draft.actions.at(-1), recent = latest?.mapId === m.id ? ` recent-${latest.type.toLowerCase()}` : '', disabled = !!a || room.state === STATES.PAUSED; return `<button class="veto-map ${a ? a.type.toLowerCase() : ''}${recent}" style="--tone:${m.tone};--image:url('${coverImage(m)}')" data-map="${m.id}" ${disabled ? 'disabled' : ''}><span>${m.code}</span><strong>${m.name}</strong><small>${a ? `${a.type} · ${a.team || 'SYSTEM'}` : m.style}</small></button>`; }
 function vetoView() {
- const step = currentStep(room), side = step?.[0] === 'SIDE'; const ledger = room.draft.actions.map((a) => `<li><b>${a.type}</b><span>${mapById(a.mapId)?.name}</span><em>${a.team ? `Team ${a.team}` : 'Decider'}</em></li>`).join('');
- return `<section class="veto-view"><div class="veto-heading"><p>${room.state === STATES.PAUSED ? 'PROTOCOL PAUSED' : 'LIVE DRAFT'}</p><h1>${actionTitle()}</h1><div id="timer" class="timer">${room.state === STATES.PAUSED ? 'Paused' : time(room.draft.deadline - Date.now())}</div><button class="quiet-control" data-action="${room.state === STATES.PAUSED ? 'resume' : 'pause'}" ${room.settings.allowPause === false ? 'disabled' : ''}>${room.state === STATES.PAUSED ? 'Resume' : 'Pause'}</button>${progress()}</div><div class="veto-stage">${side ? '<div class="side-picker"><button data-side="Attack">Attack</button><button data-side="Defense">Defense</button></div>' : `<div class="veto-grid">${room.maps.map(mapCard).join('')}</div>`}<aside class="veto-ledger"><p>THE RECORD</p><ol>${ledger || '<li><span>Awaiting first action</span></li>'}</ol></aside></div></section>`;
+ const step = currentStep(room), side = step?.[0] === 'SIDE', [type, team] = step || [];
+ const turnText = type === 'BAN' ? 'YOUR TURN TO BAN' : type === 'PICK' ? 'YOUR TURN TO PICK' : side ? 'YOUR TURN TO CHOOSE SIDE' : 'MAP DECIDER';
+ const teamNames = ['A','B'].map((teamId) => `<span class="turn-team ${team === teamId ? 'active' : ''}">${esc(room.teams[teamId].name)}</span>`).join('');
+ const ledger = room.draft.actions.map((a) => `<li><b>${a.type}</b><span>${mapById(a.mapId)?.name}</span><em>${a.team ? `Team ${a.team}` : 'Decider'}</em></li>`).join('');
+ return `<section class="veto-view ${team ? `team-turn-${team.toLowerCase()}` : 'team-turn-system'}"><div class="turn-team-strip">${teamNames}</div><div class="turn-banner" aria-live="polite"><small>${team ? esc(room.teams[team].name) : 'SYSTEM'}</small><strong>${turnText}</strong></div><div class="veto-heading"><p>${room.state === STATES.PAUSED ? 'PROTOCOL PAUSED' : 'LIVE DRAFT'}</p><h1>${actionTitle()}</h1><div id="timer" class="timer">${room.state === STATES.PAUSED ? 'Paused' : time(room.draft.deadline - Date.now())}</div><button class="quiet-control" data-action="${room.state === STATES.PAUSED ? 'resume' : 'pause'}" ${room.settings.allowPause === false ? 'disabled' : ''}>${room.state === STATES.PAUSED ? 'Resume' : 'Pause'}</button>${progress()}</div><div class="veto-stage">${side ? '<div class="side-picker"><button data-side="Attack">Attack</button><button data-side="Defense">Defense</button></div>' : `<div class="veto-grid">${room.maps.map(mapCard).join('')}</div>`}<aside class="veto-ledger"><p>THE RECORD</p><ol>${ledger || '<li><span>Awaiting first action</span></li>'}</ol></aside></div></section>`;
 }
 function resultView() {
  const picks = room.draft.actions.filter((a) => a.type === 'PICK' || a.type === 'DECIDER');
- return `<section class="result-view"><div class="editorial-head compact"><p>THE RESULT</p><h1>${esc(room.teams.A.name)} <em>v</em> ${esc(room.teams.B.name)}</h1>${progress()}</div><div class="result-sheet">${picks.map((a, i) => { const score = room.draft.scores?.[a.mapId] || {}; return `<div class="result-line"><span>Map ${i + 1}</span><strong>${mapById(a.mapId).name}</strong><input type="number" min="0" step="1" aria-label="${esc(room.teams.A.name)} score on ${mapById(a.mapId).name}" data-score-map="${a.mapId}" data-score-team="A" value="${score.A ?? 0}"><i>:</i><input type="number" min="0" step="1" aria-label="${esc(room.teams.B.name)} score on ${mapById(a.mapId).name}" data-score-map="${a.mapId}" data-score-team="B" value="${score.B ?? 0}"><em>${a.type === 'DECIDER' ? 'Decider' : `Selected by Team ${a.team}`}</em></div>`; }).join('')}</div><div class="flow-footer"><small>Scores and map actions are saved to the shared match archive.</small><button class="text-link" data-action="record">Save result <span>↗</span></button></div></section>`;
+ return `<section class="result-view"><div class="editorial-head compact"><p>THE RESULT</p><h1>${esc(room.teams.A.name)} <em>v</em> ${esc(room.teams.B.name)}</h1>${progress()}</div><div class="result-sheet">${picks.map((a, i) => { const score = room.draft.scores?.[a.mapId] || {}; return `<div class="result-line"><span>Map ${i + 1}</span><strong>${mapById(a.mapId).name}</strong><input type="number" min="0" step="1" aria-label="${esc(room.teams.A.name)} score on ${mapById(a.mapId).name}" data-score-map="${a.mapId}" data-score-team="A" value="${score.A ?? 0}"><i>:</i><input type="number" min="0" step="1" aria-label="${esc(room.teams.B.name)} score on ${mapById(a.mapId).name}" data-score-map="${a.mapId}" data-score-team="B" value="${score.B ?? 0}"><em>${a.type === 'DECIDER' ? 'Decider' : `Selected by Team ${a.team}`}</em><small class="first-side-note">${firstSideInfo(a.mapId, room.draft.sides, { A:room.teams.A.name, B:room.teams.B.name })}</small></div>`; }).join('')}</div><div class="flow-footer"><small>Scores and map actions are saved to the shared match archive.</small><button class="quiet-control" data-action="room-list">Exit to rooms</button><button class="text-link" data-action="record">Save result <span>↗</span></button></div></section>`;
 }
 function tournament() { return `<section class="simple-view"><p>TOURNAMENT CENTER</p><h1>The operation<br><em>comes next.</em></h1><div class="mist"><span>Match scheduling, brackets, public pages and tournament administration will connect to the Ban / Pick core when realtime storage is introduced.</span></div></section>`; }
 function settings() { return `<section class="simple-view"><p>SETTINGS</p><h1>Keep the ritual<br><em>your own.</em></h1><div class="mist settings-list"><button data-action="reset">Create a new local room ↗</button><button data-action="auth">${currentUser() ? 'Account settings' : 'Sign in or create account'} ↗</button><span>Audio folders are ready in <code>public/media</code>. Playback will activate when assets are added.</span></div></section>`; }
@@ -302,7 +321,7 @@ app.addEventListener('click', async (e) => {
   selectedMatchId = null; e.preventDefault(); e.stopImmediatePropagation(); render(); return;
  }
  if (el.dataset.action === 'room-list') {
-  room = null; localStorage.removeItem(ACTIVE_ROOM_STORAGE); view = 'banpick'; e.preventDefault(); e.stopImmediatePropagation(); render(); return;
+  if (room && isVetoState(room.state)) setVetoMedia(false); room = null; localStorage.removeItem(ACTIVE_ROOM_STORAGE); view = 'banpick'; e.preventDefault(); e.stopImmediatePropagation(); render(); return;
  }
  if (el.dataset.action === 'copy-room-code') {
   e.preventDefault(); e.stopImmediatePropagation();
@@ -327,7 +346,7 @@ app.addEventListener('click', async (e) => {
   try {
    if (!room || currentUser()?.id !== room.ownerId) throw new Error('Only the room owner can start this draft.');
    if (room.members.length < 2) throw new Error('Invite at least one more local account before starting.');
-   await remoteCommand('START'); setVetoMedia(true); e.preventDefault(); e.stopImmediatePropagation(); render();
+  await remoteCommand('START'); e.preventDefault(); e.stopImmediatePropagation(); render();
   } catch (error) { e.preventDefault(); e.stopImmediatePropagation(); feedback(error.message); }
   return;
  }
@@ -400,7 +419,7 @@ setInterval(() => { if (room?.state !== STATES.DRAFT) return; const remaining = 
 setInterval(() => { if (room?.state === STATES.PAUSED && room.draft.pausedAt && serverNow() - room.draft.pausedAt >= (room.settings.maxPauseSeconds || 300) * 1000 && currentUser()?.id === room.ownerId) remoteCommand('RESUME').then(render).catch(() => {}); }, 1000);
 setInterval(() => syncServerClock().catch(() => {}), 30000);
 syncServerClock().catch(() => {});
-function handleRoomUpdate(updatedRoom) { if (!room || updatedRoom.id !== room.id || Number(updatedRoom.version) <= Number(room.version)) return; activateRoom(updatedRoom); render(); }
+function handleRoomUpdate(updatedRoom) { if (!room || updatedRoom.id !== room.id || Number(updatedRoom.version) <= Number(room.version)) return; syncVetoMusic(room.state, updatedRoom.state); activateRoom(updatedRoom); render(); }
 async function boot() {
   if (currentUser()) {
     connectRealtime(handleRoomUpdate);
