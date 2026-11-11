@@ -2,6 +2,6 @@
 <resources>
     <string name="app_name">Veto Protocol</string>
     <string name="title_activity_main">Veto Protocol</string>
-    <string name="package_name">com.gdreed.draftconsole</string>
-    <string name="custom_url_scheme">com.gdreed.draftconsole</string>
+    <string name="package_name">com.gdreed.vetoprotocol</string>
+    <string name="custom_url_scheme">com.gdreed.vetoprotocol</string>
 </resources>

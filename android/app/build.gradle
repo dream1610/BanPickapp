@@ -1,10 +1,10 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace = "com.gdreed.draftconsole"
+    namespace = "com.gdreed.vetoprotocol"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.gdreed.draftconsole"
+        applicationId "com.gdreed.vetoprotocol"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 2

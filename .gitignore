@@ -1,4 +1,5 @@
 node_modules/
+electron/main.protected.cjs
 dist/
 .env
 .env.*

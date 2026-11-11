@@ -31,6 +31,10 @@ The API requires the variables in [.env.example](.env.example). Keep the real `.
 
 Render is configured by [render.yaml](render.yaml). The service runs `npm ci --include=dev && npm run build`, starts with `npm run start`, and exposes `/api/health` as its health check. Set secrets in Render Environment, not in this repository. The frontend and API are same-origin on Render.
 
+## Package Protection
+
+Production JavaScript bundles are obfuscated during builds. Electron packages them in an ASAR archive. These measures make casual inspection harder but are not encryption: an installed Electron app or APK can still be unpacked and analyzed. Do not embed secrets or security-critical logic in the client. Chromium `.pak` files are resource packs, not a suitable format for application code.
+
 ## Windows Installer
 
 ```powershell
@@ -62,6 +66,8 @@ $env:ANDROID_SDK_ROOT = $env:ANDROID_HOME
 ```
 
 Debug APK output: `android\app\build\outputs\apk\debug\app-debug.apk`; the build script also copies it to `installer\Veto-Protocol-1.0.0-android-debug.apk`. It is debug-signed for sideload/testing, not a Play Store release. A release APK/AAB needs a publisher-owned signing key; never commit that key or its password.
+
+The Android application ID is `com.gdreed.vetoprotocol`. It differs from the earlier `com.gdreed.draftconsole` ID, so Android installs this as a separate app rather than updating the earlier installation.
 
 ## Verification Notes
 
