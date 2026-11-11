@@ -1,8 +1,10 @@
 services:
   - type: web
+    # Keep this resource identity so Blueprint sync targets the existing service and API URL.
     name: gdreed-draft-console
     runtime: node
     plan: free
+    autoDeployTrigger: commit
     buildCommand: npm ci --include=dev && npm run build
     startCommand: npm run start
     healthCheckPath: /api/health

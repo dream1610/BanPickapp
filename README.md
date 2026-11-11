@@ -51,6 +51,8 @@ To build both shareable installers together, run `npm run build:installers`. The
 
 This installer is unsigned. Windows SmartScreen may show a warning. A production-signed installer requires a code-signing certificate owned and controlled by the publisher.
 
+The installer and uninstaller use an animated gold marquee to indicate activity. It is intentionally indeterminate and does not claim an exact percentage.
+
 ## Android APK
 
 Requirements: JDK 21, Android SDK Platform 36, Android Build Tools 36.0.0 and Platform Tools.
