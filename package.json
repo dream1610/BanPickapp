@@ -11,6 +11,8 @@
     "build": "vite build",
     "build:desktop": "vite build --base=./ && electron-builder --win nsis --x64",
     "pack:desktop": "vite build --base=./ && electron-builder --dir --win --x64",
+    "build:android:apk": "npm run build && npx cap sync android && android\\gradlew.bat -p android assembleDebug && node scripts/copy-android-apk.mjs",
+    "build:installers": "npm run build:desktop && npm run build:android:apk",
     "preview": "vite preview",
     "start": "node server/app.js"
   },
@@ -44,7 +46,7 @@
     "appId": "com.gdreed.draftconsole",
     "productName": "Draft Console",
     "directories": {
-      "output": "release"
+      "output": "installer"
     },
     "files": [
       "dist/**/*",

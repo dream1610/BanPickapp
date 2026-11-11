@@ -10,5 +10,6 @@ android/.gradle/
 android/local.properties
 android/app/build/
 release/
+installer/
 *.keystore
 *.jks
