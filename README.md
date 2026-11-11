@@ -1,6 +1,8 @@
-# Gdreed Draft Console
+# Veto Protocol
 
-Valorant map veto companion. Gdreed is the developer; Draft Console is the current product name.
+Independent VALORANT map veto companion developed by Le Sang Hiec, operating as Gdreed.
+
+Veto Protocol application code is proprietary. Third-party dependencies and game-related names or assets remain subject to their respective licenses and ownership.
 
 ## Runtime
 
@@ -36,7 +38,12 @@ npm test
 npm run build:desktop
 ```
 
-Installer output: `release\Draft Console-1.0.0-x64-Setup.exe`.
+Windows installer output: `installer\Veto-Protocol-1.0.0-x64-Setup.exe`.
+
+To build both shareable installers together, run `npm run build:installers`. The outputs are:
+
+- `installer\Veto-Protocol-1.0.0-x64-Setup.exe`
+- `installer\Veto-Protocol-1.0.0-android-debug.apk`
 
 This installer is unsigned. Windows SmartScreen may show a warning. A production-signed installer requires a code-signing certificate owned and controlled by the publisher.
 
@@ -54,7 +61,7 @@ $env:ANDROID_SDK_ROOT = $env:ANDROID_HOME
 .\android\gradlew.bat -p .\android assembleDebug
 ```
 
-Debug APK output: `android\app\build\outputs\apk\debug\app-debug.apk`. It is debug-signed for sideload/testing, not a Play Store release. A release APK/AAB needs a publisher-owned signing key; never commit that key or its password.
+Debug APK output: `android\app\build\outputs\apk\debug\app-debug.apk`; the build script also copies it to `installer\Veto-Protocol-1.0.0-android-debug.apk`. It is debug-signed for sideload/testing, not a Play Store release. A release APK/AAB needs a publisher-owned signing key; never commit that key or its password.
 
 ## Verification Notes
 

@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Draft Console</string>
-    <string name="title_activity_main">Draft Console</string>
+    <string name="app_name">Veto Protocol</string>
+    <string name="title_activity_main">Veto Protocol</string>
     <string name="package_name">com.gdreed.draftconsole</string>
     <string name="custom_url_scheme">com.gdreed.draftconsole</string>
 </resources>

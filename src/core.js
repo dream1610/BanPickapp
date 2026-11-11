@@ -43,7 +43,7 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 export function createRoom({ owner = null, empty = false } = {}) {
   return {
     id: crypto.randomUUID(), code: `GD-${Math.random().toString(36).slice(2,6).toUpperCase()}`,
-    name: owner ? `${owner.username}'s Draft Room` : 'Gdreed Invitational Room', description:'', owner: owner?.username ?? 'Tournament Admin', ownerId: owner?.id ?? null, format: 'BO3', state: STATES.WAITING,
+    name: owner ? `${owner.username}'s Veto Room` : 'Veto Protocol Room', description:'', owner: owner?.username ?? 'Tournament Admin', ownerId: owner?.id ?? null, format: 'BO3', state: STATES.WAITING,
     members: empty ? (owner ? [{ id:owner.id, name:owner.username, rating:0, seed:1, team:null, captain:false }] : []) : [
       { id:'p1', name:'Aether', rating:92, seed:1, team:null, captain:false }, { id:'p2', name:'Viper', rating:87, seed:2, team:null, captain:false },
       { id:'p3', name:'Kairo', rating:82, seed:3, team:null, captain:false }, { id:'p4', name:'Nyx', rating:79, seed:4, team:null, captain:false },

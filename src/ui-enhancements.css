@@ -856,6 +856,87 @@ html {
   }
 }
 
+.privacy-view {
+  width: min(940px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 48px 0 76px;
+}
+
+.privacy-view h1 {
+  margin-bottom: 16px;
+  font-size: 64px;
+  line-height: 0.98;
+}
+
+.privacy-updated {
+  margin: 0 0 30px;
+  color: #b7ad9c;
+  font-size: 11px;
+}
+
+.privacy-content {
+  max-width: 76ch;
+  color: #ded8ce;
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.privacy-content h2 {
+  margin: 30px 0 8px;
+  color: #f0d48f;
+  font: 400 21px/1.3 'Playfair Display', Georgia, serif;
+}
+
+.privacy-content p {
+  margin: 0 0 14px;
+}
+
+.privacy-content a {
+  color: #f0d48f;
+  text-underline-offset: 3px;
+}
+
+.privacy-content strong {
+  color: #f3efe8;
+}
+
+.privacy-legal-note {
+  margin-top: 30px !important;
+  color: #9c968d;
+  font-size: 11px;
+}
+
+.footer-link {
+  margin-left: 12px;
+  padding: 0;
+  color: #d7ae72;
+  background: transparent;
+  border-bottom: 1px solid #d7ae7270;
+  font: inherit;
+  cursor: pointer;
+}
+
+.delete-account-control {
+  display: block;
+  margin-top: 26px;
+  padding: 8px 0;
+  color: #d98b7f;
+  background: transparent;
+  border-bottom: 1px solid #d98b7f60;
+  font-size: 11px;
+}
+
+@media (max-width: 680px) {
+  .privacy-view {
+    width: calc(100% - 36px);
+    padding: 28px 0 50px;
+  }
+
+  .privacy-view h1 {
+    font-size: 52px;
+  }
+}
+
 @media (max-width: 680px) {
   .veto-view::before {
     inset: 6px;
@@ -871,4 +952,10 @@ html {
     padding: 8px 5px;
     overflow-wrap: anywhere;
   }
+}
+
+.wordmark .brand-logo {
+  width: 52px;
+  height: 28px;
+  object-fit: contain;
 }

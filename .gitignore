@@ -11,5 +11,8 @@ android/local.properties
 android/app/build/
 release/
 installer/
+build/*.bmp
+build/veto-protocol.ico
+build/veto-protocol-icon*.png
 *.keystore
 *.jks

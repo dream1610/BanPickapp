@@ -35,11 +35,14 @@ function getToken(request) {
   const header = request.get('authorization');
   return header?.startsWith('Bearer ') ? header.slice(7) : null;
 }
-function authenticate(request, response, next) {
+async function authenticate(request, response, next) {
   try {
     const token = getToken(request);
     if (!token) return response.status(401).json({ error:'Authentication required.' });
-    request.user = jwt.verify(token, jwtSecret);
+    const claims = jwt.verify(token, jwtSecret);
+    const result = await pool.query('SELECT username FROM users WHERE id = $1', [claims.sub]);
+    if (!result.rowCount) return response.status(401).json({ error:'Session expired. Sign in again.' });
+    request.user = { ...claims, username:result.rows[0].username };
     return next();
   } catch { return response.status(401).json({ error:'Session expired. Sign in again.' }); }
 }
@@ -71,6 +74,42 @@ app.post('/api/auth/login', async (request, response, next) => {
     if (!user || !(await bcrypt.compare(password, user.password_hash))) return response.status(401).json({ error:'Invalid username or password.' });
     response.json({ user:{ id:user.id, username:user.username }, token:sign(user) });
   } catch (error) { return next(error); }
+});
+app.delete('/api/account', authenticate, async (request, response, next) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const account = await client.query('SELECT username FROM users WHERE id = $1 FOR UPDATE', [request.user.sub]);
+    if (!account.rowCount) {
+      await client.query('ROLLBACK');
+      return response.status(404).json({ error:'Account not found.' });
+    }
+    const username = account.rows[0].username;
+    const sharedRooms = await client.query(
+      "SELECT id, snapshot FROM rooms WHERE owner_id <> $1 AND snapshot->'members' @> jsonb_build_array(jsonb_build_object('id', $1::text)) FOR UPDATE",
+      [request.user.sub],
+    );
+    const updatedRooms = [];
+    await client.query('DELETE FROM match_records WHERE created_by = $1 OR room_id IN (SELECT id FROM rooms WHERE owner_id = $1)', [request.user.sub]);
+    for (const row of sharedRooms.rows) {
+      const room = row.snapshot;
+      room.members = (room.members || []).filter((member) => member.id !== request.user.sub);
+      for (const team of ['A','B']) if (room.teams?.[team]?.captainId === request.user.sub) room.teams[team].captainId = null;
+      room.members.forEach((member) => { member.captain = room.teams?.[member.team]?.captainId === member.id; });
+      room.audit = (room.audit || []).filter((entry) => entry.actor !== username);
+      const updated = await client.query('UPDATE rooms SET snapshot = $1, version = version + 1, updated_at = NOW() WHERE id = $2 RETURNING version', [room, row.id]);
+      updatedRooms.push({ ...room, version:updated.rows[0].version });
+    }
+    await client.query('DELETE FROM rooms WHERE owner_id = $1', [request.user.sub]);
+    await client.query('DELETE FROM users WHERE id = $1', [request.user.sub]);
+    await client.query('COMMIT');
+    for (const room of updatedRooms) io.to(room.id).emit('room:updated', room);
+    for (const socket of io.sockets.sockets.values()) if (socket.user?.sub === request.user.sub) socket.disconnect(true);
+    response.status(204).end();
+  } catch (error) {
+    await client.query('ROLLBACK');
+    next(error);
+  } finally { client.release(); }
 });
 app.get('/api/rooms', authenticate, async (request, response, next) => {
   try {
@@ -136,8 +175,14 @@ app.post('/api/rooms/:id/matches', authenticate, async (request, response, next)
   } catch (error) { next(error); }
 });
 
-io.use((socket, next) => {
-  try { socket.user = jwt.verify(socket.handshake.auth?.token, jwtSecret); next(); } catch { next(new Error('Authentication required.')); }
+io.use(async (socket, next) => {
+  try {
+    const claims = jwt.verify(socket.handshake.auth?.token, jwtSecret);
+    const result = await pool.query('SELECT username FROM users WHERE id = $1', [claims.sub]);
+    if (!result.rowCount) return next(new Error('Authentication required.'));
+    socket.user = { ...claims, username:result.rows[0].username };
+    next();
+  } catch { next(new Error('Authentication required.')); }
 });
 io.on('connection', (socket) => socket.on('room:watch', async (roomId) => {
   const result = await pool.query('SELECT snapshot FROM rooms WHERE id = $1', [roomId]);
