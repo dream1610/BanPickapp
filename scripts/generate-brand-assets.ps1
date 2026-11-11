@@ -58,10 +58,9 @@ $graphics = [System.Drawing.Graphics]::FromImage($header)
 $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
 $graphics.Clear([System.Drawing.Color]::FromArgb(255, 12, 13, 14))
 $graphics.DrawLine([System.Drawing.Pen]::new([System.Drawing.Color]::FromArgb(255, 222, 179, 73), 2), 0, 56, 150, 56)
-$font = [System.Drawing.Font]::new('Georgia', 12, [System.Drawing.FontStyle]::Bold)
-$brush = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 244, 216, 143))
-$graphics.DrawString('VETO PROTOCOL', $font, $brush, 12, 18)
-$brush.Dispose(); $font.Dispose(); $graphics.Dispose()
+$graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+Draw-ContainedImage $graphics $sourceLogo ([System.Drawing.Rectangle]::new(8, 4, 134, 48))
+$graphics.Dispose()
 Save-Bitmap $header (Join-Path $build 'installerHeader.bmp') ([System.Drawing.Imaging.ImageFormat]::Bmp)
 
 $sidebar = [System.Drawing.Bitmap]::new(164, 314)
